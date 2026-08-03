@@ -71,9 +71,16 @@ solvable through the public REST API today.
 
 - If HA ships a public update/delete service, switch to it and retire the
   sync-horizon workaround.
-- Call the frontend's internal WebSocket `calendar/event/delete` command - possible
-  today, but undocumented and unsupported; a HA release could break it without
-  notice.
+- Call HA's WebSocket API (`calendar/event/delete` / a corresponding update command)
+  directly from ha-foodinator, authenticated with the same long-lived token used for
+  REST. This is not frontend-only: any external client that speaks the WS protocol
+  can call it - a community workaround even drives it from HA's own `command_line`
+  platform via `websocat` (see [home-assistant/core community thread
+  #572499](https://community.home-assistant.io/t/add-delete-event-service-to-calendar-integration/572499/34)).
+  It's still an internal, undocumented API with no stability guarantee - a HA
+  release could change or remove it without notice - so this would need its own
+  reqwest-or-tungstenite WebSocket client and defensive error handling, not a small
+  addition to the existing REST client.
 - Keep the current append-only-plus-manual-cleanup approach; it's honest about the
   constraint rather than papering over it.
 
