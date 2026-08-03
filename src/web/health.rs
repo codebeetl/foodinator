@@ -36,7 +36,7 @@ mod tests {
         let pool = sqlx::postgres::PgPoolOptions::new()
             .connect_lazy("postgres://user:pass@localhost/db")
             .expect("valid connection string");
-        AppState { pool }
+        crate::state::test_app_state(pool)
     }
 
     #[tokio::test]
@@ -66,7 +66,7 @@ mod tests {
             .acquire_timeout(std::time::Duration::from_secs(2))
             .connect_lazy("postgres://user:pass@127.0.0.1:1/db")
             .expect("valid connection string");
-        let app = router().with_state(AppState { pool });
+        let app = router().with_state(crate::state::test_app_state(pool));
 
         let response = app
             .oneshot(
@@ -91,7 +91,7 @@ mod tests {
             .connect(&database_url)
             .await
             .expect("DATABASE_URL should be reachable when this test is not skipped");
-        let app = router().with_state(AppState { pool });
+        let app = router().with_state(crate::state::test_app_state(pool));
 
         let response = app
             .oneshot(

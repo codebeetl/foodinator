@@ -49,7 +49,7 @@ mod tests {
     async fn adding_a_consumer_through_the_form_makes_it_appear_in_the_list(
         pool: PgPool,
     ) -> sqlx::Result<()> {
-        let app = router().with_state(AppState { pool });
+        let app = router().with_state(crate::state::test_app_state(pool));
 
         let create_response = app
             .clone()

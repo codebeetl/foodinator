@@ -4,6 +4,11 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub bind_addr: String,
+    pub ha_url: String,
+    pub ha_token: String,
+    pub ha_calendar_entity_id: String,
+    pub admin_username: String,
+    pub admin_password: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -15,6 +20,11 @@ impl Config {
         Ok(Config {
             database_url: required("DATABASE_URL")?,
             bind_addr: env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
+            ha_url: required("HA_URL")?,
+            ha_token: required("HA_TOKEN")?,
+            ha_calendar_entity_id: required("HA_CALENDAR_ENTITY_ID")?,
+            admin_username: required("ADMIN_USERNAME")?,
+            admin_password: required("ADMIN_PASSWORD")?,
         })
     }
 }
@@ -61,25 +71,38 @@ mod tests {
         }
     }
 
+    fn set_all_required() -> Vec<EnvVarGuard> {
+        vec![
+            EnvVarGuard::set("DATABASE_URL", "postgres://u:p@localhost/db"),
+            EnvVarGuard::set("HA_URL", "http://homeassistant.local:8123"),
+            EnvVarGuard::set("HA_TOKEN", "test-token"),
+            EnvVarGuard::set("HA_CALENDAR_ENTITY_ID", "calendar.foodinator"),
+            EnvVarGuard::set("ADMIN_USERNAME", "admin"),
+            EnvVarGuard::set("ADMIN_PASSWORD", "hunter2"),
+        ]
+    }
+
     #[test]
     fn from_env_reads_required_vars_and_defaults_bind_addr() {
         let _lock = ENV_LOCK.lock().unwrap();
         let _bind_addr = EnvVarGuard::unset("BIND_ADDR");
-        let _database_url = EnvVarGuard::set("DATABASE_URL", "postgres://u:p@localhost/db");
+        let _guards = set_all_required();
 
         let config = Config::from_env().expect("all required vars are set");
 
         assert_eq!(config.database_url, "postgres://u:p@localhost/db");
+        assert_eq!(config.ha_calendar_entity_id, "calendar.foodinator");
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
     }
 
     #[test]
     fn from_env_errors_on_missing_required_var() {
         let _lock = ENV_LOCK.lock().unwrap();
-        let _database_url = EnvVarGuard::unset("DATABASE_URL");
+        let _guards = set_all_required();
+        let _ha_token = EnvVarGuard::unset("HA_TOKEN");
 
-        let err = Config::from_env().expect_err("DATABASE_URL is missing");
+        let err = Config::from_env().expect_err("HA_TOKEN is missing");
 
-        assert_eq!(err.0, "DATABASE_URL");
+        assert_eq!(err.0, "HA_TOKEN");
     }
 }

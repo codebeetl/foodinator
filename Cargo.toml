@@ -21,6 +21,8 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 sha2 = "0.10"
 base64 = "0.22"
+async-trait = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
+wiremock = "0.6"
