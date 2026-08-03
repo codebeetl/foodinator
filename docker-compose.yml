@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://foodinator:foodinator@db:5432/foodinator
+      HA_URL: ${HA_URL}
+      HA_TOKEN: ${HA_TOKEN}
+      HA_CALENDAR_ENTITY_ID: ${HA_CALENDAR_ENTITY_ID}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      RUST_LOG: info
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: foodinator
+      POSTGRES_PASSWORD: foodinator
+      POSTGRES_DB: foodinator
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foodinator"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:
