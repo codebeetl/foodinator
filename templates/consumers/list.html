@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Consumers - ha-foodinator{% endblock %}
+
+{% block content %}
+<h2>Consumers</h2>
+<table>
+    <thead>
+        <tr><th>Name</th><th>Active</th></tr>
+    </thead>
+    <tbody>
+        {% for consumer in consumers %}
+        <tr>
+            <td>{{ consumer.name }}</td>
+            <td>{{ consumer.active }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h3>Add consumer</h3>
+<form method="post" action="/consumers">
+    <label>Name <input type="text" name="name" required></label>
+    <button type="submit">Add</button>
+</form>
+{% endblock %}
