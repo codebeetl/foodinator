@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id AS consumer_id, c.name AS consumer_name, cmp.preference FROM consumers c LEFT JOIN consumer_meal_preferences cmp ON cmp.consumer_id = c.id AND cmp.meal_id = $1 ORDER BY c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "consumer_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "consumer_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "preference",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "7473248df99710e970696f933f11c9dae49e048edddba600121f801bf2eb1894"
+}
