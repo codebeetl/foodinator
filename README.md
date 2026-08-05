@@ -71,9 +71,9 @@ DATABASE_URL=postgres://... cargo sqlx prepare
   once created - see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the verified
   details and the sync-horizon workaround this project uses.
 - This is a scaffold: only `consumers` has a full CRUD vertical slice built out.
-  `meals`, `eating_slots`, `meal_plan_entries`, and the actual meal-plan-to-calendar
-  sync job are not yet implemented (see the "What's implemented vs. deferred"
-  section of `docs/ARCHITECTURE.md`).
+  `meals`, preferences, the week-grid meal planner, and the actual
+  meal-plan-to-calendar sync trigger are not yet implemented (see the "What's
+  implemented vs. deferred" section of `docs/ARCHITECTURE.md`).
 
 ## License
 

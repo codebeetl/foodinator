@@ -9,39 +9,54 @@ CREATE TABLE consumers (
 CREATE TABLE meals (
     id          BIGSERIAL PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
-    description TEXT,
+    active      BOOLEAN NOT NULL DEFAULT true,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- One row per recurring weekday+time slot. "Mon/Wed/Fri 08:00" = 3 rows.
--- Chosen over a weekday-bitmask/array column: trivial joins, trivial
--- "what happens every Monday" queries, no bit-twiddling in SQL or Rust.
-CREATE TABLE eating_slots (
-    id                BIGSERIAL PRIMARY KEY,
-    consumer_id       BIGINT NOT NULL REFERENCES consumers(id) ON DELETE CASCADE,
-    label             TEXT NOT NULL,
-    weekday           SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6), -- 0=Mon
-    start_local_time  TIME NOT NULL,
-    duration_minutes  INTEGER NOT NULL DEFAULT 30,
-    active            BOOLEAN NOT NULL DEFAULT true,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (consumer_id, weekday, start_local_time)
+-- Standing per-consumer preference for a meal, independent of any specific
+-- occurrence. Only rows for an explicit like/dislike exist; absence means no
+-- opinion. Feeds the "who's here today -> what's suitable" suggestion query.
+CREATE TABLE consumer_meal_preferences (
+    consumer_id BIGINT NOT NULL REFERENCES consumers(id) ON DELETE CASCADE,
+    meal_id     BIGINT NOT NULL REFERENCES meals(id) ON DELETE CASCADE,
+    preference  TEXT NOT NULL CHECK (preference IN ('like', 'dislike')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (consumer_id, meal_id)
 );
 
--- Materialized occurrence: one meal assigned to one consumer's slot on one date.
+-- One meal per calendar day, shared by the whole family. start/duration
+-- overrides fall back to app_settings' default when unset.
 CREATE TABLE meal_plan_entries (
-    id             BIGSERIAL PRIMARY KEY,
-    eating_slot_id BIGINT NOT NULL REFERENCES eating_slots(id) ON DELETE CASCADE,
-    meal_id        BIGINT NOT NULL REFERENCES meals(id) ON DELETE RESTRICT,
-    entry_date     DATE NOT NULL,
-    notes          TEXT,
-    deleted_at     TIMESTAMPTZ,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (eating_slot_id, entry_date)
+    id                        BIGSERIAL PRIMARY KEY,
+    entry_date                DATE NOT NULL UNIQUE,
+    meal_id                   BIGINT NOT NULL REFERENCES meals(id) ON DELETE RESTRICT,
+    notes                     TEXT,
+    start_time_override       TIME,
+    duration_minutes_override INTEGER,
+    deleted_at                TIMESTAMPTZ,
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Who ate a given day's meal. Set at planning time, editable afterward;
+-- doubles as both the "who's here" suitability input and the historical record.
+CREATE TABLE meal_attendance (
+    meal_plan_entry_id BIGINT NOT NULL REFERENCES meal_plan_entries(id) ON DELETE CASCADE,
+    consumer_id        BIGINT NOT NULL REFERENCES consumers(id) ON DELETE CASCADE,
+    PRIMARY KEY (meal_plan_entry_id, consumer_id)
+);
+
+-- Single-row table of household-tunable defaults, editable from the admin UI
+-- without a redeploy (unlike the rest of this app's env-var-only config).
+CREATE TABLE app_settings (
+    id                        SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    default_start_time        TIME NOT NULL DEFAULT '18:30',
+    default_duration_minutes  INTEGER NOT NULL DEFAULT 30,
+    updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO app_settings (id) VALUES (1);
 
 -- Sync ledger: source of truth for idempotency lives here, not in HA.
 CREATE TABLE ha_calendar_sync (
@@ -51,6 +66,3 @@ CREATE TABLE ha_calendar_sync (
     synced_at          TIMESTAMPTZ,
     last_error         TEXT
 );
-
-CREATE INDEX idx_eating_slots_consumer ON eating_slots(consumer_id);
-CREATE INDEX idx_meal_plan_entries_slot_date ON meal_plan_entries(eating_slot_id, entry_date);

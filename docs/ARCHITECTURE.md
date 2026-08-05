@@ -16,15 +16,30 @@ HA's REST API. There is no code running inside HA.
 
 ## Data model
 
+The whole family shares one meal per day - there is no per-consumer recurring
+schedule.
+
 - `consumers` - people who eat meals.
-- `meals` - a catalog of meal names/descriptions.
-- `eating_slots` - per-consumer recurring weekday+time slots (e.g. "Alice eats
-  breakfast Mon/Wed/Fri at 08:00"). One row per weekday+time, not a bitmask, to keep
-  joins and "what happens every Monday" queries simple.
-- `meal_plan_entries` - a meal assigned to a specific consumer's eating slot on a
-  specific date. Soft-deleted (`deleted_at`), not hard-deleted, because a
-  previously-pushed HA event needs to be reconciled against, and HA has no delete
-  service to key that reconciliation off of (see below).
+- `meals` - a catalog of meal titles only (no recipes/descriptions). `active`
+  lets a meal be retired from the picker without breaking history, mirroring
+  `consumers.active`.
+- `consumer_meal_preferences` - a standing like/dislike per consumer x meal,
+  independent of any specific occurrence (a row exists only when a preference
+  was explicitly set; absence means no opinion). Feeds the "who's here today ->
+  what's suitable" suggestion query, which flags (does not exclude) meals
+  disliked by a selected attendee.
+- `meal_plan_entries` - one meal for one calendar date (`entry_date` is
+  UNIQUE). `start_time_override`/`duration_minutes_override` fall back to
+  `app_settings`' default when unset. Soft-deleted (`deleted_at`), not
+  hard-deleted, because a previously-pushed HA event needs to be reconciled
+  against, and HA has no delete service to key that reconciliation off of (see
+  below).
+- `meal_attendance` - which consumers ate a given day's meal. Set at planning
+  time and editable afterward; doubles as both the suitability-query input and
+  the historical record.
+- `app_settings` - single-row table of the default meal start time/duration.
+  The one setting that lives in the DB rather than an env var, since it's a
+  household preference an admin may want to tweak without a redeploy.
 - `ha_calendar_sync` - the idempotency ledger. Source of truth for "have we already
   pushed this entry, and has it changed since" lives here, not in HA.
 
@@ -94,19 +109,23 @@ the sync idempotency primitives described above, HTTP Basic auth, and a manual
 
 Deferred (not built yet, no code for these exists):
 
-- CRUD UI for `meals`, `eating_slots`, `meal_plan_entries` (only `consumers` was
-  built, as the reference pattern to copy).
-- `domain/schedule.rs` - materializing `meal_plan_entries` from `eating_slots` +
-  admin assignments. This is a prerequisite for any real sync job.
-- A background sync loop that actually walks `meal_plan_entries` and calls
-  `create_event`/`list_events` via the primitives in `src/ha/sync.rs`. Today those
-  primitives are unit-tested in isolation but have no caller in `src/lib.rs::run`.
+- CRUD UI for `meals`, preference editing, the `app_settings` screen, and the
+  week-grid meal planner (only `consumers` was built, as the reference pattern
+  to copy).
+- The suitability query (given a set of attendees, flag meals disliked by any
+  of them).
+- A manual "Sync to Home Assistant" trigger that walks `meal_plan_entries`
+  within the sync horizon and calls `create_event`/`list_events` via the
+  primitives in `src/ha/sync.rs`. Today those primitives are unit-tested in
+  isolation but have no caller in `src/lib.rs::run`. Deliberately manual, not a
+  background loop - a plan only needs pushing once it's actually set, typically
+  right after the Friday planning session.
 - Pagination, a stronger auth mechanism than HTTP Basic, and a broader test suite
   beyond the vertical slices already covered.
 
 ## Timezone handling
 
-Not yet decided beyond storing `eating_slots.start_local_time` as a wall-clock
-`TIME` with no attached zone. An `APP_TZ` (IANA zone name) config value will be
-needed once `domain/schedule.rs` starts converting local slot times into the UTC
-`DateTime`s the HA client and `content_hash` expect.
+A single household timezone, via a required `APP_TZ` (IANA zone name) config
+value, converts `meal_plan_entries`' wall-clock local time into the UTC
+`DateTime`s the HA client and `content_hash` expect. One timezone for the whole
+app, not per-consumer or per-entry - this is a single-family meal planner.
