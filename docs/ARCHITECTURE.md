@@ -101,27 +101,28 @@ solvable through the public REST API today.
 
 ## What's implemented vs. deferred
 
-This repository is a scaffold. Implemented: project skeleton, health/readiness
-checks, Postgres schema + migrations, a full CRUD vertical slice for `consumers`
-(DB + web UI), an HA REST client (`get_api_status`, `create_event`, `list_events`),
-the sync idempotency primitives described above, HTTP Basic auth, and a manual
-`/admin/test-event` smoke-test endpoint for the create_event call.
+Implemented: project skeleton, health/readiness checks, Postgres schema +
+migrations, full CRUD (DB + web UI) for `consumers` and `meals`, standing
+per-consumer meal preferences editable from a meal's edit page, an `app_settings`
+screen for the household's default meal time/duration, the suitability query
+(given a set of attendees, flag - never exclude - meals disliked by any of them),
+a navigable Sat-Fri week-grid meal planner (`/plan`), an HA REST client
+(`get_api_status`, `create_event`, `list_events`), the sync idempotency
+primitives described above plus the `ha_calendar_sync` ledger they feed, a
+manual global "Sync to Home Assistant" trigger (`/sync`) that walks syncable
+`meal_plan_entries` within the sync horizon, HTTP Basic auth, and a manual
+`/admin/test-event` smoke-test endpoint for the create_event call in isolation.
 
-Deferred (not built yet, no code for these exists):
+Deferred (not built, no code for these exists):
 
-- CRUD UI for `meals`, preference editing, the `app_settings` screen, and the
-  week-grid meal planner (only `consumers` was built, as the reference pattern
-  to copy).
-- The suitability query (given a set of attendees, flag meals disliked by any
-  of them).
-- A manual "Sync to Home Assistant" trigger that walks `meal_plan_entries`
-  within the sync horizon and calls `create_event`/`list_events` via the
-  primitives in `src/ha/sync.rs`. Today those primitives are unit-tested in
-  isolation but have no caller in `src/lib.rs::run`. Deliberately manual, not a
-  background loop - a plan only needs pushing once it's actually set, typically
-  right after the Friday planning session.
+- Automatic detection/surfacing of a hand-edited or marker-corrupted event on
+  read-back (`list_events` is implemented and unit-tested, but nothing calls it
+  from the sync job yet - today a corrupted marker is a silent no-op, not a
+  surfaced "needs manual cleanup" case).
 - Pagination, a stronger auth mechanism than HTTP Basic, and a broader test suite
   beyond the vertical slices already covered.
+- A configurable sync horizon (currently a 14-day constant in `src/web/sync.rs`,
+  not an env var).
 
 ## Timezone handling
 

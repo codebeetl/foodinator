@@ -1,9 +1,10 @@
 # ha-foodinator
 
-A standalone helper application that manages meals, consumers, and recurring
-weekday/time eating slots, and pushes the resulting meal-plan into a remote Home
-Assistant instance as calendar events. It runs in its own container on the network -
-it is **not** a Home Assistant custom_component/HACS integration.
+A standalone helper application that manages consumers (people), meals, standing
+like/dislike preferences, and a week-grid meal plan (one shared family meal per
+calendar day), and pushes the resulting plan into a remote Home Assistant instance
+as calendar events. It runs in its own container on the network - it is **not** a
+Home Assistant custom_component/HACS integration.
 
 ## Architecture
 
@@ -12,16 +13,21 @@ integration approach, and a documented upstream limitation (HA has no public
 service to update or delete a calendar event) along with how this project works
 around it.
 
-## Quick start
+## Quick start (local trial run)
 
 ```bash
-cp .env.example .env   # fill in HA_URL, HA_TOKEN, HA_CALENDAR_ENTITY_ID, ADMIN_*
+cp .env.example .env   # fill in HA_URL, HA_TOKEN, HA_CALENDAR_ENTITY_ID, ADMIN_*, APP_TZ
 docker compose up --build
 ```
 
 The admin web UI (HTTP Basic auth, `ADMIN_USERNAME`/`ADMIN_PASSWORD` from `.env`) is
-served at `http://localhost:8080/consumers`. Health checks are unauthenticated at
-`/healthz` (liveness) and `/readyz` (checks the database connection).
+served at `http://localhost:8080/plan`. Other pages: `/consumers`, `/meals`,
+`/settings`, `/sync` (manual "push to Home Assistant" trigger). Health checks are
+unauthenticated at `/healthz` (liveness) and `/readyz` (checks the database
+connection).
+
+For a persistent deployment on a home server (e.g. OpenMediaVault), see
+[Deploying on a local server](#deploying-on-a-local-server-eg-openmediavault) below.
 
 ## Configuration
 
@@ -36,10 +42,121 @@ All configuration is via environment variables (see `.env.example`):
 | `HA_CALENDAR_ENTITY_ID` | yes | Entity ID of the Local Calendar to push events to |
 | `ADMIN_USERNAME` | yes | HTTP Basic auth username for the admin UI |
 | `ADMIN_PASSWORD` | yes | HTTP Basic auth password for the admin UI |
-| `APP_TZ` | yes | IANA timezone the household lives in, e.g. `Australia/Sydney` |
+| `APP_TZ` | yes | IANA timezone the household lives in, e.g. `Australia/Sydney` - used for "today" in the week-grid planner and to convert meal times to UTC when pushing to Home Assistant |
+
+The app **will not start** if any required variable is missing or, for `APP_TZ`, not
+a valid IANA timezone name - it fails fast with a clear error rather than starting in
+a broken state.
 
 See [docs/HA_SETUP.md](docs/HA_SETUP.md) for creating the Local Calendar integration
 and generating a long-lived access token.
+
+## Deploying on a local server (e.g. OpenMediaVault)
+
+This section covers running ha-foodinator as a persistent service on a home server/NAS
+via Docker Compose - the `docker-compose.yml` in this repo is the same one used for
+the quick start above, just run detached with a restart policy.
+
+### Prerequisites
+
+- Docker Engine with the Compose plugin (`docker compose`, not the legacy
+  `docker-compose` v1). On OMV this is commonly provided by the **OMV-Extras**
+  "Docker Compose" plugin, or by installing Docker directly and managing it over SSH -
+  either way, the commands below are plain `docker compose` and work the same.
+- Network access from the OMV host to your Home Assistant instance (same LAN is the
+  common case).
+- A shared folder / dataset on the array to hold the project files, e.g. under
+  `/srv/dev-disk-by-uuid-<your-uuid>/appdata/`. Find your actual mount points with
+  `df -h` or in the OMV web UI under **Storage -> File Systems**.
+
+### 1. Get the code onto the server
+
+```bash
+ssh <user>@<omv-host>
+git clone https://github.com/codebeetl/foodinator.git \
+  /srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator
+cd /srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator
+```
+
+If you manage containers through OMV-Extras' Compose plugin instead of the CLI,
+point a new Compose entry at this same folder (or at its `docker-compose.yml`) rather
+than running `docker compose` by hand - the file doesn't need to change either way.
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Fill in `HA_URL`, `HA_TOKEN`, `HA_CALENDAR_ENTITY_ID` (see
+[docs/HA_SETUP.md](docs/HA_SETUP.md)), `ADMIN_USERNAME`/`ADMIN_PASSWORD`, and
+`APP_TZ`. `.env` **must live in the same directory as `docker-compose.yml`** -
+Compose loads it automatically from there; it is never read from anywhere else and
+is already excluded from git via `.gitignore`, so it's safe to edit in place.
+
+### 3. Build and start
+
+```bash
+docker compose up -d --build
+```
+
+This builds the app image locally from the `Dockerfile` in this repo (no image
+registry involved) and starts two containers:
+
+- `app` - the web UI, published on host port `8080`.
+- `db` - Postgres 16, **not** published to the host - only reachable from `app` over
+  the Compose-managed internal network.
+
+Both services have `restart: unless-stopped`, so they come back up automatically
+after a host reboot or Docker restart, without needing a cron job or systemd unit.
+Database migrations run automatically on `app` startup, so there's no separate
+migration step.
+
+### 4. Verify
+
+```bash
+curl http://localhost:8080/healthz   # liveness - always 200 once the process is up
+curl http://localhost:8080/readyz    # readiness - 200 only once the DB is reachable
+```
+
+Then open `http://<omv-host>:8080/plan` in a browser and log in with
+`ADMIN_USERNAME`/`ADMIN_PASSWORD`.
+
+### Data persistence and backups
+
+Postgres data lives in the named Docker volume `<project-name>_db-data` (the project
+name defaults to the containing directory's name, e.g. `ha-foodinator_db-data` for
+the path above - confirm the exact name with `docker volume ls`). It survives
+`docker compose down` and image rebuilds, but **not** `docker compose down -v`. Back
+it up with:
+
+```bash
+docker run --rm -v ha-foodinator_db-data:/data -v "$(pwd)":/backup alpine \
+  tar czf /backup/ha-foodinator-db-backup-$(date +%F).tar.gz -C /data .
+```
+
+If you'd rather have the database files land directly on an OMV share (for the
+NAS's own backup/snapshot tooling to pick up) instead of inside a Docker-managed
+volume, change the `db` service's volume in `docker-compose.yml` from
+`db-data:/var/lib/postgresql/data` to a bind mount, e.g.
+`/srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator/pgdata:/var/lib/postgresql/data`.
+
+### Updating
+
+```bash
+cd /srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator
+git pull
+docker compose up -d --build
+```
+
+### Firewall / networking
+
+Only port `8080` (the `app` service) needs to be reachable from wherever you use the
+admin UI - open that on the OMV host's firewall if you access it from another
+machine on the LAN. The `db` service publishes no host port at all. `HA_URL` must be
+reachable from the OMV host's Docker network - typically the same LAN your Home
+Assistant instance is on.
 
 ## Development
 
@@ -70,11 +187,15 @@ DATABASE_URL=postgres://... cargo sqlx prepare
 
 - Home Assistant's REST API has no service to update or delete a calendar event
   once created - see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the verified
-  details and the sync-horizon workaround this project uses.
-- This is a scaffold: only `consumers` has a full CRUD vertical slice built out.
-  `meals`, preferences, the week-grid meal planner, and the actual
-  meal-plan-to-calendar sync trigger are not yet implemented (see the "What's
-  implemented vs. deferred" section of `docs/ARCHITECTURE.md`).
+  details and the sync-horizon/ledger workaround this project uses. A meal-plan
+  entry that changes *after* it's been synced needs manual cleanup in HA's own
+  calendar UI.
+- Syncing to Home Assistant is a manual, global action (the "Sync to Home
+  Assistant" button on `/sync`), not a background loop, and only considers entries
+  within a 14-day horizon - by design, not a current limitation to fix.
+- Auth is HTTP Basic only, suitable for a LAN-only admin tool behind your own
+  network boundary - don't expose port 8080 directly to the internet without a
+  reverse proxy adding real authentication and TLS in front of it.
 
 ## License
 
