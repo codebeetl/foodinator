@@ -333,6 +333,23 @@ button.secondary, .button.secondary {
     to { opacity: 1; transform: translateY(0); }
 }
 
+.week-nav {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: var(--space-3);
+    font-weight: 600;
+}
+
+.plan-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--space-3);
+}
+
+.plan-day form {
+    max-width: none;
+}
+
 @media (max-width: 30rem) {
     main {
         padding: var(--space-3) var(--space-2);

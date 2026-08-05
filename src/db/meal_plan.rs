@@ -58,6 +58,19 @@ pub async fn upsert_entry(
     .await
 }
 
+/// Soft-deletes the entry for `entry_date`, if a non-deleted one exists.
+/// A no-op (not an error) when there's nothing active to delete.
+pub async fn soft_delete(pool: &PgPool, entry_date: NaiveDate) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE meal_plan_entries SET deleted_at = now(), updated_at = now() \
+         WHERE entry_date = $1 AND deleted_at IS NULL",
+        entry_date
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn get_by_date(
     pool: &PgPool,
     entry_date: NaiveDate,
@@ -157,6 +170,27 @@ mod tests {
 
         let fetched = get_by_date(&pool, date).await?.expect("entry should exist");
         assert_eq!(fetched, second);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn soft_delete_clears_the_day_and_can_be_replanned(pool: PgPool) -> sqlx::Result<()> {
+        let meal = meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let created = upsert_entry(&pool, date, meal.id, None, None, None).await?;
+
+        soft_delete(&pool, date).await?;
+
+        let fetched = get_by_date(&pool, date).await?.expect("row still exists");
+        assert!(fetched.deleted_at.is_some());
+
+        let replanned = upsert_entry(&pool, date, meal.id, None, None, None).await?;
+        assert_eq!(
+            replanned.id, created.id,
+            "re-planning the same date should reuse the row"
+        );
+        assert!(replanned.deleted_at.is_none(), "upserting should un-delete");
 
         Ok(())
     }
