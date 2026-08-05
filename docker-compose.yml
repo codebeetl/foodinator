@@ -10,6 +10,7 @@ services:
       HA_CALENDAR_ENTITY_ID: ${HA_CALENDAR_ENTITY_ID}
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      APP_TZ: ${APP_TZ}
       RUST_LOG: info
     depends_on:
       db:

@@ -36,6 +36,7 @@ All configuration is via environment variables (see `.env.example`):
 | `HA_CALENDAR_ENTITY_ID` | yes | Entity ID of the Local Calendar to push events to |
 | `ADMIN_USERNAME` | yes | HTTP Basic auth username for the admin UI |
 | `ADMIN_PASSWORD` | yes | HTTP Basic auth password for the admin UI |
+| `APP_TZ` | yes | IANA timezone the household lives in, e.g. `Australia/Sydney` |
 
 See [docs/HA_SETUP.md](docs/HA_SETUP.md) for creating the Local Calendar integration
 and generating a long-lived access token.

@@ -9,6 +9,7 @@ pub struct Config {
     pub ha_calendar_entity_id: String,
     pub admin_username: String,
     pub admin_password: String,
+    pub app_tz: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +26,7 @@ impl Config {
             ha_calendar_entity_id: required("HA_CALENDAR_ENTITY_ID")?,
             admin_username: required("ADMIN_USERNAME")?,
             admin_password: required("ADMIN_PASSWORD")?,
+            app_tz: required("APP_TZ")?,
         })
     }
 }
@@ -79,6 +81,7 @@ mod tests {
             EnvVarGuard::set("HA_CALENDAR_ENTITY_ID", "calendar.foodinator"),
             EnvVarGuard::set("ADMIN_USERNAME", "admin"),
             EnvVarGuard::set("ADMIN_PASSWORD", "hunter2"),
+            EnvVarGuard::set("APP_TZ", "Australia/Sydney"),
         ]
     }
 
@@ -93,6 +96,7 @@ mod tests {
         assert_eq!(config.database_url, "postgres://u:p@localhost/db");
         assert_eq!(config.ha_calendar_entity_id, "calendar.foodinator");
         assert_eq!(config.bind_addr, "0.0.0.0:8080");
+        assert_eq!(config.app_tz, "Australia/Sydney");
     }
 
     #[test]
@@ -104,5 +108,16 @@ mod tests {
         let err = Config::from_env().expect_err("HA_TOKEN is missing");
 
         assert_eq!(err.0, "HA_TOKEN");
+    }
+
+    #[test]
+    fn from_env_errors_on_missing_app_tz() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _guards = set_all_required();
+        let _app_tz = EnvVarGuard::unset("APP_TZ");
+
+        let err = Config::from_env().expect_err("APP_TZ is missing");
+
+        assert_eq!(err.0, "APP_TZ");
     }
 }
