@@ -68,7 +68,9 @@ struct PlanQuery {
 }
 
 async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> PlanTemplate {
-    let week_start = query.start.unwrap_or_else(|| next_saturday(clock::today()));
+    let week_start = query
+        .start
+        .unwrap_or_else(|| next_saturday(clock::today(&state.household_tz)));
 
     let consumers: Vec<Consumer> = consumers::list_all(&state.pool)
         .await

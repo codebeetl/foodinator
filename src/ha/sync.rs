@@ -23,6 +23,26 @@ pub fn build_marker(meal_plan_entry_id: i64) -> String {
     format!("{MARKER_PREFIX}{meal_plan_entry_id}")
 }
 
+/// Builds an HA event description with attendee names and notes above the
+/// sync marker line, so a human looking at the calendar entry sees who's
+/// attending and any notes, while the marker stays machine-parseable.
+pub fn build_description(
+    attendee_names: &[String],
+    notes: Option<&str>,
+    meal_plan_entry_id: i64,
+) -> String {
+    let mut lines = Vec::new();
+    if !attendee_names.is_empty() {
+        lines.push(format!("Attendees: {}", attendee_names.join(", ")));
+    }
+    if let Some(notes) = notes {
+        lines.push(notes.to_string());
+    }
+    lines.push(String::new());
+    lines.push(build_marker(meal_plan_entry_id));
+    lines.join("\n")
+}
+
 /// Recovers the meal_plan_entry_id from a description previously produced by
 /// `build_marker`. Returns None if the marker is missing or corrupted (e.g. a human
 /// hand-edited the event in HA's UI) - callers surface that as a manual-cleanup case.
@@ -93,6 +113,40 @@ mod tests {
         let a = content_hash("ab", "c", "", "");
         let b = content_hash("a", "bc", "", "");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn build_description_includes_attendees_and_notes_above_the_marker() {
+        let description = build_description(
+            &["Alice".to_string(), "Bob".to_string()],
+            Some("bring the good hot sauce"),
+            42,
+        );
+
+        let marker_line = description
+            .lines()
+            .position(|line| line.starts_with(MARKER_PREFIX))
+            .expect("marker line must be present");
+        let attendees_line = description
+            .lines()
+            .position(|line| line.contains("Alice") && line.contains("Bob"))
+            .expect("attendees must be listed");
+        let notes_line = description
+            .lines()
+            .position(|line| line.contains("bring the good hot sauce"))
+            .expect("notes must be present");
+
+        assert!(attendees_line < marker_line);
+        assert!(notes_line < marker_line);
+        assert_eq!(extract_marker_entry_id(&description), Some(42));
+    }
+
+    #[test]
+    fn build_description_omits_empty_sections_but_keeps_the_marker() {
+        let description = build_description(&[], None, 7);
+
+        assert!(!description.to_lowercase().contains("attendees"));
+        assert_eq!(extract_marker_entry_id(&description), Some(7));
     }
 
     #[test]

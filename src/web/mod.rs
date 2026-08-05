@@ -5,6 +5,7 @@ mod health;
 mod meals;
 mod plan;
 mod settings;
+mod sync;
 
 use axum::middleware;
 use axum::Router;
@@ -18,6 +19,7 @@ pub fn router(state: AppState) -> Router {
         .merge(meals::router())
         .merge(plan::router())
         .merge(settings::router())
+        .merge(sync::router())
         .merge(admin::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),

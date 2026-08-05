@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mpe.id, mpe.entry_date, m.name AS meal_name, mpe.notes,\n             mpe.start_time_override, mpe.duration_minutes_override,\n             array_remove(array_agg(c.name ORDER BY c.name), NULL) AS \"attendee_names!\"\n           FROM meal_plan_entries mpe\n           JOIN meals m ON m.id = mpe.meal_id\n           LEFT JOIN meal_attendance ma ON ma.meal_plan_entry_id = mpe.id\n           LEFT JOIN consumers c ON c.id = ma.consumer_id\n           LEFT JOIN ha_calendar_sync hcs ON hcs.meal_plan_entry_id = mpe.id\n           WHERE mpe.deleted_at IS NULL\n             AND hcs.synced_at IS NULL\n             AND mpe.entry_date >= $1\n           GROUP BY mpe.id, m.name\n           ORDER BY mpe.entry_date",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "entry_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "meal_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "start_time_override",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 5,
+        "name": "duration_minutes_override",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "attendee_names!",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "1e539fcbe0d380697c1984b1f0edc21d9003295fe458b01ac88b878ea9be2da4"
+}

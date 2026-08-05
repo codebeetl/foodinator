@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use chrono_tz::Tz;
 use sqlx::PgPool;
 
 use crate::ha::CalendarSync;
@@ -10,6 +11,7 @@ pub struct AppState {
     pub ha_client: Arc<dyn CalendarSync>,
     pub admin_username: String,
     pub admin_password: String,
+    pub household_tz: Tz,
 }
 
 #[cfg(test)]
@@ -20,5 +22,6 @@ pub fn test_app_state(pool: PgPool) -> AppState {
         ha_client: Arc::new(NoopCalendarSync),
         admin_username: "admin".to_string(),
         admin_password: "hunter2".to_string(),
+        household_tz: chrono_tz::UTC,
     }
 }

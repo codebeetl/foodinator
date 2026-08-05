@@ -35,11 +35,17 @@ pub async fn run() {
         config.ha_calendar_entity_id.clone(),
     );
 
+    let household_tz: chrono_tz::Tz = config
+        .app_tz
+        .parse()
+        .expect("APP_TZ is not a valid IANA timezone name");
+
     let state = AppState {
         pool,
         ha_client: Arc::new(ha_client),
         admin_username: config.admin_username.clone(),
         admin_password: config.admin_password.clone(),
+        household_tz,
     };
     let app = web::router(state);
 

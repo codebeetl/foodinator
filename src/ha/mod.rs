@@ -72,4 +72,33 @@ pub mod test_support {
             Ok(vec![])
         }
     }
+
+    /// A CalendarSync whose create_event always fails, for testing the sync
+    /// job's failure path.
+    pub struct FailingCalendarSync;
+
+    #[async_trait]
+    impl CalendarSync for FailingCalendarSync {
+        async fn get_api_status(&self) -> Result<(), HaError> {
+            Err(HaError::Status(reqwest::StatusCode::SERVICE_UNAVAILABLE))
+        }
+
+        async fn create_event(
+            &self,
+            _summary: &str,
+            _description: &str,
+            _start: DateTime<Utc>,
+            _end: DateTime<Utc>,
+        ) -> Result<(), HaError> {
+            Err(HaError::Status(reqwest::StatusCode::SERVICE_UNAVAILABLE))
+        }
+
+        async fn list_events(
+            &self,
+            _start: DateTime<Utc>,
+            _end: DateTime<Utc>,
+        ) -> Result<Vec<HaEvent>, HaError> {
+            Ok(vec![])
+        }
+    }
 }
