@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE app_settings SET default_start_time = $1, default_duration_minutes = $2, updated_at = now() WHERE id = 1 RETURNING default_start_time, default_duration_minutes, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "default_start_time",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 1,
+        "name": "default_duration_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Time",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2f897a7e1e4f94f30d9f44dc0915abb085b341b0ad4d649806a5552aad645fd9"
+}

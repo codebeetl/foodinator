@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - ha-foodinator{% endblock %}
+
+{% block content %}
+<h2>Settings</h2>
+<form class="card" method="post" action="/settings">
+    <label>Default start time
+        <input type="time" name="default_start_time" value="{{ settings.default_start_time }}" required>
+    </label>
+    <label>Default duration (minutes)
+        <input type="number" name="default_duration_minutes" min="1" value="{{ settings.default_duration_minutes }}" required>
+    </label>
+    <button type="submit">Save</button>
+</form>
+{% endblock %}
