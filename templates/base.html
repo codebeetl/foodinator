@@ -2,11 +2,19 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}ha-foodinator{% endblock %}</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <header><h1>ha-foodinator</h1></header>
-    <main>{% block content %}{% endblock %}</main>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+        <h1>ha-foodinator</h1>
+        <nav class="site-nav" aria-label="Primary">
+            <a href="/consumers">Consumers</a>
+            <a href="/meals">Meals</a>
+        </nav>
+    </header>
+    <main id="main">{% block content %}{% endblock %}</main>
 </body>
 </html>

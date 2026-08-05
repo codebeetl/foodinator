@@ -1,28 +1,28 @@
 {% extends "base.html" %}
 {% import "macros.html" as macros %}
 
-{% block title %}Consumers - ha-foodinator{% endblock %}
+{% block title %}Meals - ha-foodinator{% endblock %}
 
 {% block content %}
-<h2>Consumers</h2>
+<h2>Meals</h2>
 <div class="table-scroll card">
     <table>
         <thead>
             <tr><th>Name</th><th>Status</th></tr>
         </thead>
         <tbody>
-            {% for consumer in consumers %}
+            {% for meal in meals %}
             <tr>
-                <td>{{ consumer.name }}</td>
-                <td>{% call macros::status_badge(consumer.active) %}</td>
+                <td><a class="row-link" href="/meals/{{ meal.id }}">{{ meal.name }}</a></td>
+                <td>{% call macros::status_badge(meal.active) %}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 
-<h3>Add consumer</h3>
-<form method="post" action="/consumers">
+<h3>Add meal</h3>
+<form method="post" action="/meals">
     <label>Name <input type="text" name="name" required></label>
     <button type="submit">Add</button>
 </form>

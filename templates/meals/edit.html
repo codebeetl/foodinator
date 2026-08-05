@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}{{ meal.name }} - ha-foodinator{% endblock %}
+
+{% block content %}
+<h2>Edit meal</h2>
+<form class="card" method="post" action="/meals/{{ meal.id }}">
+    <label>Name <input type="text" name="name" value="{{ meal.name }}" required></label>
+    <label class="checkbox-group">
+        <input type="checkbox" name="active" value="true" {% if meal.active %}checked{% endif %}>
+        Active
+    </label>
+    <button type="submit">Save</button>
+</form>
+{% endblock %}

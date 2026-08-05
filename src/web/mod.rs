@@ -2,6 +2,7 @@ mod admin;
 mod auth;
 mod consumers;
 mod health;
+mod meals;
 
 use axum::middleware;
 use axum::Router;
@@ -12,6 +13,7 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .merge(consumers::router())
+        .merge(meals::router())
         .merge(admin::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
