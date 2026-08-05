@@ -68,6 +68,10 @@ the quick start above, just run detached with a restart policy.
 - A shared folder / dataset on the array to hold the project files, e.g. under
   `/srv/dev-disk-by-uuid-<your-uuid>/appdata/`. Find your actual mount points with
   `df -h` or in the OMV web UI under **Storage -> File Systems**.
+- The published container image (`ghcr.io/codebeetl/foodinator`) is private, since
+  the repo is private. The OMV host needs a one-time `docker login ghcr.io` using a
+  GitHub personal access token with `read:packages` scope before it can pull it -
+  see step 3 below.
 
 ### 1. Get the code onto the server
 
@@ -95,14 +99,20 @@ Fill in `HA_URL`, `HA_TOKEN`, `HA_CALENDAR_ENTITY_ID` (see
 Compose loads it automatically from there; it is never read from anywhere else and
 is already excluded from git via `.gitignore`, so it's safe to edit in place.
 
-### 3. Build and start
+### 3. Pull and start
 
 ```bash
-docker compose up -d --build
+docker login ghcr.io -u <github-username>   # first time only
+docker compose pull
+docker compose up -d
 ```
 
-This builds the app image locally from the `Dockerfile` in this repo (no image
-registry involved) and starts two containers:
+`docker login` will prompt for a password - use a GitHub personal access token
+with `read:packages` scope, not your account password. This pulls the prebuilt
+image published to GHCR by `.github/workflows/docker-publish.yml` - note that a
+new image is only published when a GitHub Release is cut, not on every push to
+`main`, so "deploy the latest code" means cutting a release first. It starts
+two containers:
 
 - `app` - the web UI, published on host port `8080`.
 - `db` - Postgres 16, **not** published to the host - only reachable from `app` over
@@ -112,6 +122,10 @@ Both services have `restart: unless-stopped`, so they come back up automatically
 after a host reboot or Docker restart, without needing a cron job or systemd unit.
 Database migrations run automatically on `app` startup, so there's no separate
 migration step.
+
+If no release has been published yet, or you'd rather build from source directly
+on the NAS, `docker compose up -d --build` still works exactly as before - it
+builds from the `Dockerfile` in this repo instead of pulling from GHCR.
 
 ### 4. Verify
 
@@ -147,8 +161,13 @@ volume, change the `db` service's volume in `docker-compose.yml` from
 ```bash
 cd /srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator
 git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
+
+`git pull` picks up any `docker-compose.yml`/README/migration changes; `docker
+compose pull` fetches the latest published image (only present once a GitHub
+Release has been cut - see step 3 above).
 
 ### Firewall / networking
 
