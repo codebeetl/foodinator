@@ -6,37 +6,74 @@
       {
         "ordinal": 0,
         "name": "id",
-        "type_info": "Int8"
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "meal_plan_entries",
+            "name": "id"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "entry_date",
-        "type_info": "Date"
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "meal_plan_entries",
+            "name": "entry_date"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "meal_name",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "meals",
+            "name": "name"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "notes",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "meal_plan_entries",
+            "name": "notes"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "start_time_override",
-        "type_info": "Time"
+        "type_info": "Time",
+        "origin": {
+          "Table": {
+            "table": "meal_plan_entries",
+            "name": "start_time_override"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "duration_minutes_override",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "meal_plan_entries",
+            "name": "duration_minutes_override"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "attendee_names!",
-        "type_info": "TextArray"
+        "type_info": "TextArray",
+        "origin": "Expression"
       }
     ],
     "parameters": {

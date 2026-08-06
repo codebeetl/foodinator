@@ -6,42 +6,90 @@
       {
         "ordinal": 0,
         "name": "default_start_time",
-        "type_info": "Time"
+        "type_info": "Time",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "default_start_time"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "default_duration_minutes",
-        "type_info": "Int4"
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "default_duration_minutes"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "ha_url",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "ha_url"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "ha_token",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "ha_token"
+          }
+        }
       },
       {
         "ordinal": 4,
         "name": "ha_calendar_entity_id",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "ha_calendar_entity_id"
+          }
+        }
       },
       {
         "ordinal": 5,
         "name": "week_start_weekday",
-        "type_info": "Int2"
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "week_start_weekday"
+          }
+        }
       },
       {
         "ordinal": 6,
         "name": "theme",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "theme"
+          }
+        }
       },
       {
         "ordinal": 7,
         "name": "updated_at",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "updated_at"
+          }
+        }
       }
     ],
     "parameters": {
