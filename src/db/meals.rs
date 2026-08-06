@@ -15,7 +15,7 @@ pub struct Meal {
 pub async fn list_all(pool: &PgPool) -> sqlx::Result<Vec<Meal>> {
     sqlx::query_as!(
         Meal,
-        "SELECT id, name, active, created_at, updated_at FROM meals ORDER BY id"
+        r#"SELECT id, name, active, created_at, updated_at FROM meals ORDER BY name COLLATE "C""#
     )
     .fetch_all(pool)
     .await
@@ -129,6 +129,20 @@ mod tests {
 
         let all = list_all(&pool).await?;
         assert_eq!(all, vec![created]);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_all_returns_meals_ordered_alphabetically(pool: PgPool) -> sqlx::Result<()> {
+        insert(&pool, "Tacos").await?;
+        insert(&pool, "Chili").await?;
+
+        let all = list_all(&pool).await?;
+
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].name, "Chili");
+        assert_eq!(all[1].name, "Tacos");
 
         Ok(())
     }

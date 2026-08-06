@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, name, active, is_default, created_at, updated_at FROM consumers ORDER BY id",
+  "query": "SELECT id, name, active, created_at, updated_at FROM meals ORDER BY name COLLATE \"C\"",
   "describe": {
     "columns": [
       {
@@ -20,16 +20,11 @@
       },
       {
         "ordinal": 3,
-        "name": "is_default",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -42,9 +37,8 @@
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "bdf2874862e3e9cacc09943d9e03cf01828e2c2551aaba0eed6daabc95dc1c7f"
+  "hash": "38afac1a06fcc1d5e0b0434c0cb79159187638ecf2ba68ef6aab91c6e6919a9f"
 }
