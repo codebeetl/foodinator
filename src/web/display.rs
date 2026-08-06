@@ -16,6 +16,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/display", get(show))
         .route("/display/data", get(data))
+        .route("/display/preview", get(preview))
 }
 
 #[derive(Deserialize)]
@@ -169,6 +170,31 @@ async fn data(State(state): State<AppState>, Query(query): Query<DisplayQuery>) 
     Json(DisplayData { week_start, days }).into_response()
 }
 
+/// Lives inside the normal Basic-Auth-protected admin app (unlike
+/// /display itself, which is token-gated so a tablet can load it without a
+/// password) - lets the household preview the kiosk view and grab its URL to
+/// paste into a tablet's browser, without needing to know the token by heart.
+#[derive(Template)]
+#[template(path = "display_preview.html")]
+struct DisplayPreviewTemplate {
+    display_path: String,
+    ha_configured: bool,
+    display_configured: bool,
+}
+
+async fn preview(State(state): State<AppState>) -> Response {
+    let Some(token) = &state.display_token else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    DisplayPreviewTemplate {
+        display_path: format!("/display?token={token}"),
+        ha_configured: state.ha_client().await.is_some(),
+        display_configured: true,
+    }
+    .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +266,52 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn preview_returns_404_when_display_token_is_not_configured() {
+        let app = router().with_state(state_with(None));
+
+        let response = app
+            .oneshot(
+                Request::get("/display/preview")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn preview_shows_the_reference_url_with_the_token_embedded(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let mut state = crate::state::test_app_state(pool);
+        state.display_token = Some("kiosk-secret".to_string());
+        let app = router().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::get("/display/preview")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("/display?token=kiosk-secret"),
+            "the reference URL should include the real token: {html}"
+        );
+
+        Ok(())
     }
 
     #[tokio::test]

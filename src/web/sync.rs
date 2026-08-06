@@ -33,12 +33,14 @@ struct SyncResults {
 #[template(path = "sync.html")]
 struct SyncTemplate {
     ha_configured: bool,
+    display_configured: bool,
     results: Option<SyncResults>,
 }
 
 async fn show(State(state): State<AppState>) -> SyncTemplate {
     SyncTemplate {
         ha_configured: state.ha_client().await.is_some(),
+        display_configured: state.display_token.is_some(),
         results: None,
     }
 }
@@ -47,6 +49,7 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
     let Some(ha_client) = state.ha_client().await else {
         return SyncTemplate {
             ha_configured: false,
+            display_configured: state.display_token.is_some(),
             results: None,
         };
     };
@@ -117,6 +120,7 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
 
     SyncTemplate {
         ha_configured: true,
+        display_configured: state.display_token.is_some(),
         results: Some(SyncResults { synced, failed }),
     }
 }

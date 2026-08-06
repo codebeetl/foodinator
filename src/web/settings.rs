@@ -28,6 +28,7 @@ enum TestResult {
 struct SettingsTemplate {
     settings: AppSettings,
     ha_configured: bool,
+    display_configured: bool,
     // Only set right after a Test Connection submission - the typed (not
     // necessarily saved) values are echoed back so the URL/entity-ID fields
     // don't appear to reset, without ever echoing the token itself.
@@ -52,6 +53,7 @@ async fn show(State(state): State<AppState>) -> SettingsTemplate {
         ha_calendar_entity_id_input: settings.ha_calendar_entity_id.clone().unwrap_or_default(),
         settings,
         ha_configured,
+        display_configured: state.display_token.is_some(),
         test_result: None,
         app_version: APP_VERSION,
     }
@@ -150,6 +152,7 @@ async fn test_ha_connection(
     SettingsTemplate {
         settings,
         ha_configured,
+        display_configured: state.display_token.is_some(),
         ha_url_input: form.ha_url,
         ha_calendar_entity_id_input: form.ha_calendar_entity_id,
         test_result,

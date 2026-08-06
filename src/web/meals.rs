@@ -50,6 +50,7 @@ struct MealRow {
 struct MealsListTemplate {
     rows: Vec<MealRow>,
     ha_configured: bool,
+    display_configured: bool,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +106,7 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
     MealsListTemplate {
         rows,
         ha_configured: state.ha_client().await.is_some(),
+        display_configured: state.display_token.is_some(),
     }
 }
 
@@ -126,6 +128,7 @@ struct MealEditTemplate {
     meal: Meal,
     preferences: Vec<ConsumerPreference>,
     ha_configured: bool,
+    display_configured: bool,
 }
 
 async fn edit_form(
@@ -143,6 +146,7 @@ async fn edit_form(
         meal,
         preferences,
         ha_configured: state.ha_client().await.is_some(),
+        display_configured: state.display_token.is_some(),
     })
 }
 

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Display - Foodinator{% endblock %}
+
+{% block content %}
+<h2>Wall display</h2>
+<div class="card">
+    <p>Open this URL on the tablet or screen you want mounted on the wall -
+    it needs no password, just this token. Use your server's actual
+    hostname/IP in place of whatever this browser shows if the tablet can't
+    reach it the same way you do.</p>
+    <p><a href="{{ display_path }}" target="_blank" rel="noopener">{{ display_path }}</a></p>
+</div>
+
+<div class="card">
+    <h3>Preview</h3>
+    <iframe class="display-preview-frame" src="{{ display_path }}" title="Wall display preview"></iframe>
+</div>
+{% endblock %}

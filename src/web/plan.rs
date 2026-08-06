@@ -71,6 +71,7 @@ struct PlanTemplate {
     days: Vec<PlanDay>,
     consumers: Vec<Consumer>,
     ha_configured: bool,
+    display_configured: bool,
 }
 
 #[derive(Deserialize)]
@@ -162,6 +163,7 @@ async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> 
         days,
         consumers,
         ha_configured: state.ha_client().await.is_some(),
+        display_configured: state.display_token.is_some(),
     }
 }
 

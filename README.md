@@ -83,6 +83,11 @@ all (`404`) if `DISPLAY_TOKEN` is unset. It shows the same week grid `/plan` com
 itself by polling every 5 minutes - no interaction needed once it's loaded. Leave
 `DISPLAY_TOKEN` unset to disable the route entirely.
 
+When `DISPLAY_TOKEN` is set, a **Display** tab appears in the admin nav
+(`/display/preview`, behind the normal HTTP Basic auth) showing the exact URL with
+the token filled in, plus a live embedded preview - so you don't need to construct
+or remember the URL yourself when setting up the tablet.
+
 ## Deploying on a local server (e.g. OpenMediaVault)
 
 This section covers running Foodinator as a persistent service on a home server/NAS
