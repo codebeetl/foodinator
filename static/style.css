@@ -473,6 +473,16 @@ button.secondary, .button.secondary {
     align-self: flex-start;
 }
 
+.meal-picker {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.4rem;
+}
+
+.meal-picker label {
+    flex: 1;
+}
+
 .meal-picker-trigger {
     width: 100%;
     text-align: left;
@@ -486,6 +496,23 @@ button.secondary, .button.secondary {
     box-shadow: none;
     transform: none;
     border-color: var(--color-accent);
+}
+
+.meal-picker-clear {
+    flex-shrink: 0;
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+    padding: 0;
+    background: transparent;
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.meal-picker-clear:hover {
+    color: var(--color-danger);
+    border-color: var(--color-danger);
 }
 
 #meal-search-dialog {

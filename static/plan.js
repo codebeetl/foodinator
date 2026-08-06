@@ -121,6 +121,14 @@
       return;
     }
 
+    // Same "Clear this day" action as the button at the bottom of the card -
+    // just reachable right next to the meal you're trying to undo.
+    const clearBtn = event.target.closest(".meal-picker-clear");
+    if (clearBtn) {
+      clearBtn.closest(".plan-day").querySelector("form.inline").requestSubmit();
+      return;
+    }
+
     const addGuestBtn = event.target.closest(".add-guest-btn");
     if (addGuestBtn) {
       addGuestField(addGuestBtn.previousElementSibling);

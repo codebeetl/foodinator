@@ -16,14 +16,17 @@
         <form method="post" action="/plan/{{ day.date }}" class="plan-day-form">
             <input type="hidden" name="week_start" value="{{ week_start }}">
 
-            <label>Meal
-                <div class="meal-picker">
-                    <input type="hidden" name="meal_id" value="{% if let Some(id) = day.selected_meal_id %}{{ id }}{% endif %}">
+            <div class="meal-picker">
+                <input type="hidden" name="meal_id" value="{% if let Some(id) = day.selected_meal_id %}{{ id }}{% endif %}">
+                <label>Meal
                     <button type="button" class="meal-picker-trigger">
                         {% if let Some(name) = day.selected_meal_name %}{{ name }}{% else %}Choose a meal{% endif %}
                     </button>
-                </div>
-            </label>
+                </label>
+                {% if day.has_entry %}
+                <button type="button" class="meal-picker-clear" aria-label="Clear this day">&times;</button>
+                {% endif %}
+            </div>
 
             {% if !consumers.is_empty() %}
             <div class="consumer-chips">
