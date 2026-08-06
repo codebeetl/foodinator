@@ -50,6 +50,7 @@ struct MealRow {
 #[template(path = "meals/list.html")]
 struct MealsListTemplate {
     rows: Vec<MealRow>,
+    duplicate: bool,
     ha_configured: bool,
     display_configured: bool,
 }
@@ -59,6 +60,12 @@ struct ListQuery {
     // Which row's preferences <details> should render open, e.g. right after
     // saving it - otherwise the list page always starts fully collapsed.
     open: Option<i64>,
+    // Set after a rejected duplicate-name submission - the client-side
+    // autocomplete on the add-meal form already blocks the common case, this
+    // is the server-side backstop (meals.name is UNIQUE) for anyone who gets
+    // past it (JS disabled, a name added in another tab moments earlier).
+    #[serde(default)]
+    duplicate: bool,
 }
 
 async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> MealsListTemplate {
@@ -106,6 +113,7 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
 
     MealsListTemplate {
         rows,
+        duplicate: query.duplicate,
         ha_configured: state.ha_client().await.is_some(),
         display_configured: state.display_token.is_some(),
     }
@@ -117,10 +125,17 @@ struct NewMealForm {
 }
 
 async fn create(State(state): State<AppState>, Form(form): Form<NewMealForm>) -> Redirect {
-    meals::insert(&state.pool, &form.name)
-        .await
-        .expect("failed to insert meal");
-    Redirect::to("/meals")
+    match meals::insert(&state.pool, &form.name).await {
+        Ok(_) => Redirect::to("/meals"),
+        Err(err)
+            if err
+                .as_database_error()
+                .is_some_and(|e| e.is_unique_violation()) =>
+        {
+            Redirect::to("/meals?duplicate=true")
+        }
+        Err(err) => panic!("failed to insert meal: {err}"),
+    }
 }
 
 #[derive(Template)]
@@ -336,6 +351,52 @@ mod tests {
         assert!(
             html.contains("Spaghetti Bolognese"),
             "list page should show the new meal: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn submitting_a_duplicate_meal_name_redirects_with_a_notice_instead_of_erroring(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        meals::insert(&pool, "Tacos").await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/meals")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("name=Tacos"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            "/meals?duplicate=true"
+        );
+
+        let all = meals::list_all(&pool).await?;
+        assert_eq!(all.len(), 1, "the duplicate must not be inserted");
+
+        let list_response = app
+            .oneshot(
+                Request::get("/meals?duplicate=true")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(list_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("already exists"),
+            "the duplicate-name notice should render: {html}"
         );
 
         Ok(())

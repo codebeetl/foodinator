@@ -50,8 +50,17 @@
 </div>
 
 <h3>Add meal</h3>
-<form method="post" action="/meals">
-    <label>Name <input type="text" name="name" required></label>
-    <button type="submit">Add</button>
+{% if duplicate %}
+<p class="badge badge-dislike">A meal with that name already exists - check the list above.</p>
+{% endif %}
+<form method="post" action="/meals" class="add-meal-form">
+    <label>Name <input type="text" name="name" id="add-meal-name" autocomplete="off" required></label>
+    <ul id="add-meal-suggestions" class="meal-search-suggestions" hidden></ul>
+    <p id="add-meal-duplicate-note" class="add-meal-duplicate-note" hidden>This meal already exists.</p>
+    <button type="submit" id="add-meal-submit">Add</button>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/meals.js" defer></script>
 {% endblock %}
