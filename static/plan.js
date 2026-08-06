@@ -67,11 +67,23 @@
     renderResults(items, query);
   }
 
+  // Every other field only auto-submits once a meal is chosen - otherwise
+  // toggling an attendee or typing a note on an unplanned day would either
+  // silently fail (meal_id is required) or pop the meal picker open on every
+  // keystroke. Picking a meal is what "graduates" the day and saves
+  // whatever's already been filled in alongside it.
+  function autoSubmit(form) {
+    const mealIdInput = form.querySelector('input[name="meal_id"]');
+    if (!mealIdInput.value) return;
+    form.requestSubmit();
+  }
+
   function selectMeal(id, name) {
     if (!activePicker) return;
     activePicker.querySelector('input[name="meal_id"]').value = id;
     activePicker.querySelector(".meal-picker-trigger").textContent = name;
     dialog.close();
+    activePicker.closest("form").requestSubmit();
   }
 
   async function createMeal(name) {
@@ -117,8 +129,18 @@
 
     const removeGuestBtn = event.target.closest(".remove-guest-btn");
     if (removeGuestBtn) {
+      const form = removeGuestBtn.closest("form");
       removeGuestBtn.closest(".guest-chip").remove();
+      autoSubmit(form);
     }
+  });
+
+  // "change" (not "input") so text/number/time fields save once the user
+  // moves on rather than on every keystroke; checkboxes fire "change"
+  // immediately, which is the right behaviour for them.
+  document.addEventListener("change", (event) => {
+    const form = event.target.closest(".plan-day-form");
+    if (form) autoSubmit(form);
   });
 
   closeBtn.addEventListener("click", () => dialog.close());
