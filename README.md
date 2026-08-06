@@ -100,10 +100,8 @@ the quick start above, just run detached with a restart policy.
 - A shared folder / dataset on the array to hold the project files, e.g. under
   `/srv/dev-disk-by-uuid-<your-uuid>/appdata/`. Find your actual mount points with
   `df -h` or in the OMV web UI under **Storage -> File Systems**.
-- The published container image (`ghcr.io/codebeetl/foodinator`) is private, since
-  the repo is private. The OMV host needs a one-time `docker login ghcr.io` using a
-  GitHub personal access token with `read:packages` scope before it can pull it -
-  see step 3 below.
+- The published container image (`ghcr.io/codebeetl/foodinator`) is public, so
+  `docker compose pull` works with no login step.
 
 ### 1. Get the code onto the server
 
@@ -134,14 +132,12 @@ is already excluded from git via `.gitignore`, so it's safe to edit in place.
 ### 3. Pull and start
 
 ```bash
-docker login ghcr.io -u <github-username>   # first time only
 docker compose pull
 docker compose up -d
 ```
 
-`docker login` will prompt for a password - use a GitHub personal access token
-with `read:packages` scope, not your account password. This pulls the prebuilt
-image published to GHCR by `.github/workflows/docker-publish.yml` - note that a
+This pulls the prebuilt image published to GHCR by
+`.github/workflows/docker-publish.yml` - note that a
 new image is only published when a GitHub Release is cut, not on every push to
 `main`, so "deploy the latest code" means cutting a release first. It starts
 two containers:
