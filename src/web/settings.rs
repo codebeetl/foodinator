@@ -29,6 +29,7 @@ struct SettingsTemplate {
     settings: AppSettings,
     ha_configured: bool,
     display_configured: bool,
+    theme: String,
     // Only set right after a Test Connection submission - the typed (not
     // necessarily saved) values are echoed back so the URL/entity-ID fields
     // don't appear to reset, without ever echoing the token itself.
@@ -51,6 +52,7 @@ async fn show(State(state): State<AppState>) -> SettingsTemplate {
     SettingsTemplate {
         ha_url_input: settings.ha_url.clone().unwrap_or_default(),
         ha_calendar_entity_id_input: settings.ha_calendar_entity_id.clone().unwrap_or_default(),
+        theme: settings.theme.clone(),
         settings,
         ha_configured,
         display_configured: state.display_token.is_some(),
@@ -64,6 +66,7 @@ struct UpdateSettingsForm {
     default_start_time: NaiveTime,
     default_duration_minutes: i32,
     week_start_weekday: i16,
+    theme: String,
     ha_url: String,
     ha_token: String,
     ha_calendar_entity_id: String,
@@ -75,6 +78,7 @@ async fn update(State(state): State<AppState>, Form(form): Form<UpdateSettingsFo
         form.default_start_time,
         form.default_duration_minutes,
         form.week_start_weekday,
+        &form.theme,
     )
     .await
     .expect("failed to update settings");
@@ -150,6 +154,7 @@ async fn test_ha_connection(
         .expect("failed to fetch settings");
     let ha_configured = state.ha_client().await.is_some();
     SettingsTemplate {
+        theme: settings.theme.clone(),
         settings,
         ha_configured,
         display_configured: state.display_token.is_some(),
@@ -202,7 +207,7 @@ mod tests {
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(
                         "default_start_time=19%3A00&default_duration_minutes=45&\
-                         week_start_weekday=5&\
+                         week_start_weekday=5&theme=dark&\
                          ha_url=http%3A%2F%2Fha.local&ha_token=secret&\
                          ha_calendar_entity_id=calendar.foodinator",
                     ))
@@ -218,11 +223,42 @@ mod tests {
             NaiveTime::from_hms_opt(19, 0, 0).unwrap()
         );
         assert_eq!(updated.default_duration_minutes, 45);
+        assert_eq!(updated.theme, "dark");
         assert_eq!(updated.ha_url.as_deref(), Some("http://ha.local"));
         assert_eq!(updated.ha_token.as_deref(), Some("secret"));
         assert_eq!(
             updated.ha_calendar_entity_id.as_deref(),
             Some("calendar.foodinator")
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn settings_page_reflects_the_saved_theme_in_the_root_data_attribute(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        settings::update(
+            &pool,
+            NaiveTime::from_hms_opt(18, 30, 0).unwrap(),
+            30,
+            5,
+            "dark",
+        )
+        .await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(Request::get("/settings").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains(r#"data-theme="dark""#),
+            "the root element should carry the saved theme: {html}"
         );
 
         Ok(())
@@ -238,7 +274,7 @@ mod tests {
                 .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .body(Body::from(
                     "default_start_time=18%3A30&default_duration_minutes=30&\
-                     week_start_weekday=5&\
+                     week_start_weekday=5&theme=auto&\
                      ha_url=http%3A%2F%2Fha.local&ha_token=&ha_calendar_entity_id=",
                 ))
                 .unwrap(),

@@ -180,6 +180,7 @@ struct DisplayPreviewTemplate {
     display_path: String,
     ha_configured: bool,
     display_configured: bool,
+    theme: String,
 }
 
 async fn preview(State(state): State<AppState>) -> Response {
@@ -191,6 +192,7 @@ async fn preview(State(state): State<AppState>) -> Response {
         display_path: format!("/display?token={token}"),
         ha_configured: state.ha_client().await.is_some(),
         display_configured: true,
+        theme: state.theme().await,
     }
     .into_response()
 }
@@ -238,6 +240,7 @@ mod tests {
             current.default_start_time,
             current.default_duration_minutes,
             today.weekday().num_days_from_monday() as i16,
+            &current.theme,
         )
         .await
         .expect("failed to pin week_start_weekday");

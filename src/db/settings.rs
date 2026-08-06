@@ -12,6 +12,8 @@ pub struct AppSettings {
     pub ha_calendar_entity_id: Option<String>,
     // 0=Monday .. 6=Sunday, matching chrono's Weekday::num_days_from_monday().
     pub week_start_weekday: i16,
+    // "light", "dark", or "auto" - enforced by a CHECK constraint in the DB.
+    pub theme: String,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -56,7 +58,7 @@ pub async fn get(pool: &PgPool) -> sqlx::Result<AppSettings> {
     sqlx::query_as!(
         AppSettings,
         "SELECT default_start_time, default_duration_minutes, \
-           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, updated_at \
+           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at \
          FROM app_settings WHERE id = 1"
     )
     .fetch_one(pool)
@@ -68,16 +70,18 @@ pub async fn update(
     default_start_time: NaiveTime,
     default_duration_minutes: i32,
     week_start_weekday: i16,
+    theme: &str,
 ) -> sqlx::Result<AppSettings> {
     sqlx::query_as!(
         AppSettings,
         "UPDATE app_settings SET default_start_time = $1, default_duration_minutes = $2, \
-         week_start_weekday = $3, updated_at = now() WHERE id = 1 \
+         week_start_weekday = $3, theme = $4, updated_at = now() WHERE id = 1 \
          RETURNING default_start_time, default_duration_minutes, \
-           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, updated_at",
+           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at",
         default_start_time,
         default_duration_minutes,
-        week_start_weekday
+        week_start_weekday,
+        theme
     )
     .fetch_one(pool)
     .await
@@ -108,7 +112,7 @@ pub async fn update_ha(
            updated_at = now() \
          WHERE id = 1 \
          RETURNING default_start_time, default_duration_minutes, \
-           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, updated_at",
+           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at",
         ha_url,
         ha_token,
         ha_calendar_entity_id
@@ -138,14 +142,35 @@ mod tests {
     async fn updating_settings_persists(pool: PgPool) -> sqlx::Result<()> {
         let new_start = NaiveTime::from_hms_opt(19, 0, 0).unwrap();
 
-        let updated = update(&pool, new_start, 45, 2).await?;
+        let updated = update(&pool, new_start, 45, 2, "dark").await?;
         assert_eq!(updated.default_start_time, new_start);
         assert_eq!(updated.default_duration_minutes, 45);
         assert_eq!(updated.week_start_weekday, 2);
+        assert_eq!(updated.theme, "dark");
 
         let fetched = get(&pool).await?;
         assert_eq!(fetched, updated);
 
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn settings_default_to_auto_theme(pool: PgPool) -> sqlx::Result<()> {
+        let settings = get(&pool).await?;
+        assert_eq!(settings.theme, "auto");
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn an_invalid_theme_is_rejected_by_the_database_check_constraint(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let start = NaiveTime::from_hms_opt(18, 30, 0).unwrap();
+        let result = update(&pool, start, 30, 5, "purple").await;
+        assert!(
+            result.is_err(),
+            "a theme outside light/dark/auto should be rejected"
+        );
         Ok(())
     }
 
@@ -222,6 +247,7 @@ mod tests {
             ha_token: None,
             ha_calendar_entity_id: None,
             week_start_weekday: 5,
+            theme: "auto".to_string(),
             updated_at: Utc::now(),
         };
 

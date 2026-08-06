@@ -37,6 +37,35 @@
     }
 }
 
+/* Explicit theme="light"/"dark" (set via Settings) override the OS
+   preference above; theme="auto" sets neither attribute value here, so it
+   falls through to the plain :root and prefers-color-scheme blocks. */
+:root[data-theme="light"] {
+    color-scheme: light;
+    --color-bg: #f7f7f5;
+    --color-surface: #ffffff;
+    --color-text: #1c1c1e;
+    --color-text-muted: #6b6b70;
+    --color-border: #e0e0e0;
+    --color-accent: #2f7d5f;
+    --color-accent-contrast: #ffffff;
+    --color-like: #2f7d5f;
+    --color-dislike: #b3261e;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --color-bg: #16171a;
+    --color-surface: #1f2023;
+    --color-text: #f0f0f2;
+    --color-text-muted: #a2a2a8;
+    --color-border: #2d2e33;
+    --color-accent: #4fbf8f;
+    --color-accent-contrast: #0c1310;
+    --color-like: #4fbf8f;
+    --color-dislike: #e2645c;
+}
+
 /* Progressive enhancement: animated cross-page transitions where supported,
    silently ignored elsewhere. */
 @view-transition {

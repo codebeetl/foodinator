@@ -53,6 +53,7 @@ struct MealsListTemplate {
     duplicate: bool,
     ha_configured: bool,
     display_configured: bool,
+    theme: String,
 }
 
 #[derive(Deserialize)]
@@ -116,6 +117,7 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
         duplicate: query.duplicate,
         ha_configured: state.ha_client().await.is_some(),
         display_configured: state.display_token.is_some(),
+        theme: state.theme().await,
     }
 }
 
@@ -149,6 +151,7 @@ struct MealEditTemplate {
     delete_blocked_by_plan_history: bool,
     ha_configured: bool,
     display_configured: bool,
+    theme: String,
 }
 
 #[derive(Deserialize)]
@@ -175,6 +178,7 @@ async fn edit_form(
         delete_blocked_by_plan_history: query.delete_blocked,
         ha_configured: state.ha_client().await.is_some(),
         display_configured: state.display_token.is_some(),
+        theme: state.theme().await,
     })
 }
 

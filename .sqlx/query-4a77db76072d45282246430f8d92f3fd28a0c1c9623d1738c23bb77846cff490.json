@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT default_start_time, default_duration_minutes, ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, updated_at FROM app_settings WHERE id = 1",
+  "query": "SELECT default_start_time, default_duration_minutes, ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at FROM app_settings WHERE id = 1",
   "describe": {
     "columns": [
       {
@@ -35,6 +35,11 @@
       },
       {
         "ordinal": 6,
+        "name": "theme",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -49,8 +54,9 @@
       true,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "d1fe5a696844869e283081a74369122544b7ec6f23cd5663204ead183d6df452"
+  "hash": "4a77db76072d45282246430f8d92f3fd28a0c1c9623d1738c23bb77846cff490"
 }

@@ -20,6 +20,7 @@ struct ConsumersListTemplate {
     consumers: Vec<Consumer>,
     ha_configured: bool,
     display_configured: bool,
+    theme: String,
 }
 
 async fn list(State(state): State<AppState>) -> ConsumersListTemplate {
@@ -30,6 +31,7 @@ async fn list(State(state): State<AppState>) -> ConsumersListTemplate {
         consumers,
         ha_configured: state.ha_client().await.is_some(),
         display_configured: state.display_token.is_some(),
+        theme: state.theme().await,
     }
 }
 

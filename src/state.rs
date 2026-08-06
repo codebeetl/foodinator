@@ -44,6 +44,16 @@ impl AppState {
         )?;
         Some((self.ha_client_factory)(config))
     }
+
+    /// The saved theme preference ("light", "dark", or "auto"). Reads fresh
+    /// every call, same rationale as `ha_client` - a Settings-page edit
+    /// should take effect on the very next request.
+    pub async fn theme(&self) -> String {
+        settings::get(&self.pool)
+            .await
+            .expect("failed to load settings")
+            .theme
+    }
 }
 
 #[cfg(test)]

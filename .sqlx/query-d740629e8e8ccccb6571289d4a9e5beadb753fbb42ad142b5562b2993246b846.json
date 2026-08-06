@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE app_settings SET default_start_time = $1, default_duration_minutes = $2, week_start_weekday = $3, updated_at = now() WHERE id = 1 RETURNING default_start_time, default_duration_minutes, ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, updated_at",
+  "query": "UPDATE app_settings SET ha_url = $1, ha_token = COALESCE($2, ha_token), ha_calendar_entity_id = $3, updated_at = now() WHERE id = 1 RETURNING default_start_time, default_duration_minutes, ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at",
   "describe": {
     "columns": [
       {
@@ -35,15 +35,20 @@
       },
       {
         "ordinal": 6,
+        "name": "theme",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Time",
-        "Int4",
-        "Int2"
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -53,8 +58,9 @@
       true,
       true,
       false,
+      false,
       false
     ]
   },
-  "hash": "657864c6eded59763dba802abe7f3276d7b9d5a9b9f83a22da76f65b62b2cd40"
+  "hash": "d740629e8e8ccccb6571289d4a9e5beadb753fbb42ad142b5562b2993246b846"
 }
