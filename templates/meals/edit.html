@@ -4,6 +4,11 @@
 
 {% block content %}
 <h2>Edit meal</h2>
+{% if delete_blocked_by_plan_history %}
+<p class="badge badge-dislike">Can't delete - this meal appears in past or
+current meal plans. Untick "Active" instead to retire it without losing that
+history.</p>
+{% endif %}
 <form class="card" method="post" action="/meals/{{ meal.id }}">
     <label>Name <input type="text" name="name" value="{{ meal.name }}" required></label>
     <label class="checkbox-group">
@@ -27,5 +32,10 @@
         {% endfor %}
     </div>
     {% endif %}
+</form>
+
+<form method="post" action="/meals/{{ meal.id }}/delete" class="inline"
+      onsubmit="return confirm('Delete this meal? This cannot be undone.');">
+    <button type="submit" class="secondary">Delete meal</button>
 </form>
 {% endblock %}

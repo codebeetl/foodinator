@@ -55,6 +55,20 @@ pub async fn update(pool: &PgPool, id: i64, name: &str, active: bool) -> sqlx::R
     .await
 }
 
+/// meal_plan_entries.meal_id is ON DELETE RESTRICT (unlike
+/// consumer_meal_preferences, which cascades) specifically so plan history
+/// is never silently lost by deleting a meal - this fails with a
+/// foreign-key-violation error if the meal appears in any plan entry, past
+/// or present. Callers should check `err.as_database_error()
+/// .is_some_and(|e| e.is_foreign_key_violation())` and suggest deactivating
+/// instead.
+pub async fn delete(pool: &PgPool, id: i64) -> sqlx::Result<()> {
+    sqlx::query!("DELETE FROM meals WHERE id = $1", id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Trigram-ranked search for the plan-day meal picker: exact match first, then
 /// prefix match, then similarity - tolerant of typos, unlike plain ILIKE.
 /// `attendee_ids` feeds the same like/dislike annotations as suitability_for_attendees.
@@ -176,6 +190,49 @@ mod tests {
 
         let fetched = get(&pool, created.id).await?.expect("meal should exist");
         assert_eq!(fetched, updated);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn delete_removes_a_meal_that_was_never_planned(pool: PgPool) -> sqlx::Result<()> {
+        let created = insert(&pool, "Tacos").await?;
+
+        delete(&pool, created.id).await?;
+
+        assert_eq!(get(&pool, created.id).await?, None);
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn delete_fails_with_a_foreign_key_violation_when_the_meal_is_in_plan_history(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let created = insert(&pool, "Tacos").await?;
+        crate::db::meal_plan::upsert_entry(
+            &pool,
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+            created.id,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await?;
+
+        let err = delete(&pool, created.id)
+            .await
+            .expect_err("should be blocked by the meal_plan_entries FK");
+        assert!(
+            err.as_database_error()
+                .is_some_and(|e| e.is_foreign_key_violation()),
+            "expected a foreign-key-violation error, got: {err:?}"
+        );
+
+        assert!(
+            get(&pool, created.id).await?.is_some(),
+            "the meal should still exist after a failed delete"
+        );
 
         Ok(())
     }

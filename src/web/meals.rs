@@ -23,6 +23,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/meals", get(list).post(create))
         .route("/meals/:id", get(edit_form).post(update))
+        .route("/meals/:id/delete", axum::routing::post(delete))
         .route(
             "/meals/:id/preferences",
             axum::routing::post(update_preferences),
@@ -127,13 +128,24 @@ async fn create(State(state): State<AppState>, Form(form): Form<NewMealForm>) ->
 struct MealEditTemplate {
     meal: Meal,
     preferences: Vec<ConsumerPreference>,
+    // Only set right after a failed delete attempt - meal_plan_entries.meal_id
+    // is ON DELETE RESTRICT, so a meal that's ever been planned can't be
+    // deleted outright.
+    delete_blocked_by_plan_history: bool,
     ha_configured: bool,
     display_configured: bool,
+}
+
+#[derive(Deserialize)]
+struct EditQuery {
+    #[serde(default)]
+    delete_blocked: bool,
 }
 
 async fn edit_form(
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    Query(query): Query<EditQuery>,
 ) -> Result<MealEditTemplate, StatusCode> {
     let meal = meals::get(&state.pool, id)
         .await
@@ -145,9 +157,24 @@ async fn edit_form(
     Ok(MealEditTemplate {
         meal,
         preferences,
+        delete_blocked_by_plan_history: query.delete_blocked,
         ha_configured: state.ha_client().await.is_some(),
         display_configured: state.display_token.is_some(),
     })
+}
+
+async fn delete(State(state): State<AppState>, Path(id): Path<i64>) -> Redirect {
+    match meals::delete(&state.pool, id).await {
+        Ok(()) => Redirect::to("/meals"),
+        Err(err)
+            if err
+                .as_database_error()
+                .is_some_and(|e| e.is_foreign_key_violation()) =>
+        {
+            Redirect::to(&format!("/meals/{id}?delete_blocked=true"))
+        }
+        Err(err) => panic!("failed to delete meal: {err}"),
+    }
 }
 
 #[derive(Deserialize)]
@@ -361,6 +388,85 @@ mod tests {
 
         let prefs = preferences::list_for_meal(&pool, meal.id).await?;
         assert_eq!(prefs[0].preference.as_deref(), Some("dislike"));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deleting_an_unplanned_meal_removes_it_and_redirects_to_the_list(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let meal = meals::insert(&pool, "Tacos").await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post(format!("/meals/{}/delete", meal.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/meals");
+
+        assert_eq!(meals::get(&pool, meal.id).await?, None);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deleting_a_meal_with_plan_history_is_blocked_and_shows_a_notice(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let meal = meals::insert(&pool, "Tacos").await?;
+        crate::db::meal_plan::upsert_entry(
+            &pool,
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+            meal.id,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post(format!("/meals/{}/delete", meal.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            &format!("/meals/{}?delete_blocked=true", meal.id)
+        );
+        assert!(
+            meals::get(&pool, meal.id).await?.is_some(),
+            "blocked delete must not remove the meal"
+        );
+
+        let edit_response = app
+            .oneshot(
+                Request::get(format!("/meals/{}?delete_blocked=true", meal.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(edit_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("Can&#x27;t delete") || html.contains("Can't delete"),
+            "the blocked-delete notice should render: {html}"
+        );
 
         Ok(())
     }
