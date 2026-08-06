@@ -28,12 +28,24 @@
   }
 
   function renderResults(items, query) {
-    currentItems = items;
     resultsList.innerHTML = "";
 
-    if (items.length === 0 && query.trim() !== "") {
-      currentItems = [{ create: true, name: query.trim() }];
-    }
+    // Trigram similarity means "no exact match" often still returns similar
+    // existing meals (e.g. typing a new "Chicken Curry" next to an existing
+    // "Chicken Soup") - the create option must stay available whenever
+    // there's no exact match, not just when there are zero results, or
+    // there's no way to add a genuinely new but similar-sounding meal. It
+    // goes first (not appended) so it's what Enter/the default highlight
+    // picks - existing similar meals are demoted to "you might mean one of
+    // these instead" rather than being silently auto-selected.
+    const trimmedQuery = query.trim();
+    const hasExactMatch = items.some(
+      (item) => item.name.toLowerCase() === trimmedQuery.toLowerCase()
+    );
+    currentItems =
+      trimmedQuery !== "" && !hasExactMatch
+        ? [{ create: true, name: trimmedQuery }, ...items]
+        : items;
 
     currentItems.forEach((item, index) => {
       const li = document.createElement("li");
