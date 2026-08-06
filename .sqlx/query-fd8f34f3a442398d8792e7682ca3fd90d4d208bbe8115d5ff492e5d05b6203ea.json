@@ -1,0 +1,81 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO meal_plan_entries (entry_date, meal_id, notes, start_time_override, duration_minutes_override, guest_names) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (entry_date) DO UPDATE SET meal_id = EXCLUDED.meal_id, notes = EXCLUDED.notes, start_time_override = EXCLUDED.start_time_override, duration_minutes_override = EXCLUDED.duration_minutes_override, guest_names = EXCLUDED.guest_names, deleted_at = NULL, updated_at = now() RETURNING id, entry_date, meal_id, notes, start_time_override, duration_minutes_override, guest_names, deleted_at, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "entry_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "meal_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "start_time_override",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 5,
+        "name": "duration_minutes_override",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "guest_names",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8",
+        "Text",
+        "Time",
+        "Int4",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "fd8f34f3a442398d8792e7682ca3fd90d4d208bbe8115d5ff492e5d05b6203ea"
+}

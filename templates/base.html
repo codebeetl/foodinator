@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Foodinator{% endblock %}</title>
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+        <h1>Foodinator</h1>
+        <nav class="site-nav" aria-label="Primary">
+            <a href="/consumers">Consumers</a>
+            <a href="/meals">Meals</a>
+            <a href="/plan">Plan</a>
+            {% if ha_configured %}<a href="/sync">Sync</a>{% endif %}
+            <a href="/settings">Settings</a>
+        </nav>
+    </header>
+    <main id="main">{% block content %}{% endblock %}</main>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

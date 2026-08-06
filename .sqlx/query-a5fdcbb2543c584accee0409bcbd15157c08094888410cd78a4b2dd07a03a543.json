@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE meal_plan_entries SET deleted_at = now(), updated_at = now() WHERE entry_date = $1 AND deleted_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a5fdcbb2543c584accee0409bcbd15157c08094888410cd78a4b2dd07a03a543"
+}

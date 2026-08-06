@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE app_settings SET default_start_time = $1, default_duration_minutes = $2, week_start_weekday = $3, updated_at = now() WHERE id = 1 RETURNING default_start_time, default_duration_minutes, ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "default_start_time",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 1,
+        "name": "default_duration_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "ha_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "ha_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "ha_calendar_entity_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "week_start_weekday",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Time",
+        "Int4",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "657864c6eded59763dba802abe7f3276d7b9d5a9b9f83a22da76f65b62b2cd40"
+}

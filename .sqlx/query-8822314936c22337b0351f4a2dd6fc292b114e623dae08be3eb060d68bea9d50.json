@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id, m.name, EXISTS (\n             SELECT 1 FROM consumer_meal_preferences p\n             WHERE p.meal_id = m.id\n               AND p.preference = 'dislike'\n               AND p.consumer_id = ANY($2::bigint[])\n           ) AS \"disliked_by_attendee!\"\n         FROM meals m\n         WHERE m.active AND (m.name ILIKE '%' || $1 || '%' OR similarity(m.name, $1) > 0.2)\n         ORDER BY\n           CASE\n             WHEN lower(m.name) = lower($1) THEN 0\n             WHEN m.name ILIKE $1 || '%' THEN 1\n             ELSE 2\n           END,\n           similarity(m.name, $1) DESC,\n           m.name COLLATE \"C\"\n         LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "disliked_by_attendee!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "8822314936c22337b0351f4a2dd6fc292b114e623dae08be3eb060d68bea9d50"
+}

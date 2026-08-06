@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "macros.html" as macros %}
+
+{% block title %}Meals - Foodinator{% endblock %}
+
+{% block content %}
+<h2>Meals</h2>
+<div class="table-scroll card">
+    <table>
+        <thead>
+            <tr><th>Name</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+            {% for meal in meals %}
+            <tr>
+                <td><a class="row-link" href="/meals/{{ meal.id }}">{{ meal.name }}</a></td>
+                <td>{% call macros::status_badge(meal.active) %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<h3>Add meal</h3>
+<form method="post" action="/meals">
+    <label>Name <input type="text" name="name" required></label>
+    <button type="submit">Add</button>
+</form>
+{% endblock %}

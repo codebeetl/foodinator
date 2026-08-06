@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% import "macros.html" as macros %}
+
+{% block title %}Consumers - Foodinator{% endblock %}
+
+{% block content %}
+<h2>Consumers</h2>
+<div class="table-scroll card">
+    <table>
+        <thead>
+            <tr><th>Name</th><th>Status</th><th>Default attendee</th></tr>
+        </thead>
+        <tbody>
+            {% for consumer in consumers %}
+            <tr>
+                <td>{{ consumer.name }}</td>
+                <td>{% call macros::status_badge(consumer.active) %}</td>
+                <td>
+                    <form method="post" action="/consumers/{{ consumer.id }}" class="inline">
+                        <label>
+                            <input type="checkbox" name="is_default" {% if consumer.is_default %}checked{% endif %}>
+                            Default
+                        </label>
+                        <button type="submit" class="secondary">Save</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<h3>Add consumer</h3>
+<form method="post" action="/consumers">
+    <label>Name <input type="text" name="name" required></label>
+    <button type="submit">Add</button>
+</form>
+{% endblock %}

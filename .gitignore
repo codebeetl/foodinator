@@ -1,0 +1,8 @@
+/target
+.env
+*.pdb
+.DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json
+.playwright-mcp/

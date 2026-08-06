@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Foodinator{% endblock %}
+
+{% block content %}
+<h2>Settings</h2>
+<form class="card" method="post" action="/settings">
+    <label>Default start time
+        <input type="time" name="default_start_time" value="{{ settings.default_start_time }}" required>
+    </label>
+    <label>Default duration (minutes)
+        <input type="number" name="default_duration_minutes" min="1" value="{{ settings.default_duration_minutes }}" required>
+    </label>
+    <label>Week starts on
+        <select name="week_start_weekday" required>
+            <option value="0" {% if settings.week_start_weekday == 0 %}selected{% endif %}>Monday</option>
+            <option value="1" {% if settings.week_start_weekday == 1 %}selected{% endif %}>Tuesday</option>
+            <option value="2" {% if settings.week_start_weekday == 2 %}selected{% endif %}>Wednesday</option>
+            <option value="3" {% if settings.week_start_weekday == 3 %}selected{% endif %}>Thursday</option>
+            <option value="4" {% if settings.week_start_weekday == 4 %}selected{% endif %}>Friday</option>
+            <option value="5" {% if settings.week_start_weekday == 5 %}selected{% endif %}>Saturday</option>
+            <option value="6" {% if settings.week_start_weekday == 6 %}selected{% endif %}>Sunday</option>
+        </select>
+    </label>
+
+    <h3>Home Assistant</h3>
+    <p>Optional - leave all three blank (and unset the matching env vars) to
+    disable Home Assistant syncing entirely. Any field left blank here falls
+    back to its <code>HA_URL</code>/<code>HA_TOKEN</code>/<code>HA_CALENDAR_ENTITY_ID</code>
+    env var. Sync-related pages and the "Sync" nav link only appear once all
+    three resolve to a value.
+    {% if ha_configured %}Currently <strong>configured</strong>.{% else %}Currently <strong>not configured</strong>.{% endif %}</p>
+
+    <label>HA URL
+        <input type="text" name="ha_url" value="{{ ha_url_input }}" placeholder="http://homeassistant.local:8123">
+    </label>
+    <label>HA long-lived access token
+        <input type="password" name="ha_token" placeholder="{% if settings.ha_token.is_some() %}Leave blank to keep the saved token{% else %}Not set{% endif %}">
+    </label>
+    <label>HA calendar entity ID
+        <input type="text" name="ha_calendar_entity_id" value="{{ ha_calendar_entity_id_input }}" placeholder="calendar.foodinator">
+    </label>
+
+    {% match test_result %}
+    {% when Some with (TestResult::Success) %}
+    <p class="badge badge-active">Connection successful</p>
+    {% when Some with (TestResult::Failure(message)) %}
+    <p class="badge badge-dislike">Connection failed: {{ message }}</p>
+    {% when Some with (TestResult::NotConfigured) %}
+    <p class="badge badge-inactive">Not configured - fill in all three fields (or their env-var equivalents) to test</p>
+    {% when None %}
+    {% endmatch %}
+
+    <div class="settings-actions">
+        <button type="submit">Save</button>
+        <button type="submit" class="secondary" formaction="/settings/ha-test" formmethod="post" formnovalidate>Test connection</button>
+    </div>
+</form>
+{% endblock %}

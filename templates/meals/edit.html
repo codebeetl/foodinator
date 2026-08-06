@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}{{ meal.name }} - Foodinator{% endblock %}
+
+{% block content %}
+<h2>Edit meal</h2>
+<form class="card" method="post" action="/meals/{{ meal.id }}">
+    <label>Name <input type="text" name="name" value="{{ meal.name }}" required></label>
+    <label class="checkbox-group">
+        <input type="checkbox" name="active" value="true" {% if meal.active %}checked{% endif %}>
+        Active
+    </label>
+    <button type="submit">Save</button>
+
+    {% if !preferences.is_empty() %}
+    <h3>Preferences</h3>
+    <div class="checkbox-group" style="flex-direction: column; align-items: stretch;">
+        {% for pref in preferences %}
+        <label style="flex-direction: row; justify-content: space-between;">
+            {{ pref.consumer_name }}
+            <select name="preference_{{ pref.consumer_id }}">
+                <option value="" {% if pref.preference.is_none() %}selected{% endif %}>No opinion</option>
+                <option value="like" {% if let Some(p) = pref.preference %}{% if p == "like" %}selected{% endif %}{% endif %}>Likes</option>
+                <option value="dislike" {% if let Some(p) = pref.preference %}{% if p == "dislike" %}selected{% endif %}{% endif %}>Dislikes</option>
+            </select>
+        </label>
+        {% endfor %}
+    </div>
+    {% endif %}
+</form>
+{% endblock %}

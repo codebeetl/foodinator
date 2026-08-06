@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT default_start_time, default_duration_minutes, ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, updated_at FROM app_settings WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "default_start_time",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 1,
+        "name": "default_duration_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "ha_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "ha_token",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "ha_calendar_entity_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "week_start_weekday",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d1fe5a696844869e283081a74369122544b7ec6f23cd5663204ead183d6df452"
+}

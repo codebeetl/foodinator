@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Foodinator - Display</title>
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="stylesheet" href="/static/display.css">
+</head>
+<body>
+    <div class="kiosk-week" data-week-start="{{ week_start }}">
+        {% for day in days %}
+        <div class="kiosk-day {% if day.is_today %}kiosk-day-today{% endif %}" data-day-index="{{ loop.index0 }}">
+            <div class="kiosk-day-date">{{ day.date_label }}</div>
+            <div class="kiosk-meal-name" data-field="meal_name" {% if day.meal_name.is_none() %}hidden{% endif %}>{% if let Some(name) = day.meal_name %}{{ name }}{% endif %}</div>
+            <div class="kiosk-empty" data-field="empty" {% if day.meal_name.is_some() %}hidden{% endif %}>Nothing planned</div>
+            <div class="kiosk-meal-time" data-field="meal_time" {% if day.meal_time.is_none() %}hidden{% endif %}>{% if let Some(time) = day.meal_time %}{{ time }}{% endif %}</div>
+            <div class="kiosk-attendees" data-field="attendees" {% if day.attendees.is_none() %}hidden{% endif %}>{% if let Some(names) = day.attendees %}{{ names }}{% endif %}</div>
+            <div class="kiosk-notes" data-field="notes" {% if day.notes.is_none() %}hidden{% endif %}>{% if let Some(notes) = day.notes %}{{ notes }}{% endif %}</div>
+            <div class="kiosk-sync-status {% if let Some(status) = day.sync_status %}kiosk-sync-status--{{ status }}{% endif %}" data-field="sync_status" {% if day.sync_status.is_none() %}hidden{% endif %}>{% if let Some(status) = day.sync_status %}{{ status }}{% endif %}</div>
+        </div>
+        {% endfor %}
+    </div>
+    <script src="/static/display.js" defer></script>
+</body>
+</html>

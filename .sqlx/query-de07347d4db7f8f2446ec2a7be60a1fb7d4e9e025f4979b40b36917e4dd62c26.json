@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, entry_date, meal_id, notes, start_time_override, duration_minutes_override, guest_names, deleted_at, created_at, updated_at FROM meal_plan_entries WHERE entry_date = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "entry_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "meal_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "notes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "start_time_override",
+        "type_info": "Time"
+      },
+      {
+        "ordinal": 5,
+        "name": "duration_minutes_override",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "guest_names",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "de07347d4db7f8f2446ec2a7be60a1fb7d4e9e025f4979b40b36917e4dd62c26"
+}

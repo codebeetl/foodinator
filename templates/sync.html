@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Sync - Foodinator{% endblock %}
+
+{% block content %}
+<h2>Sync to Home Assistant</h2>
+{% if ha_configured %}
+<div class="card">
+    <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
+    14 days to your Home Assistant calendar. Once an entry is synced it
+    can't be corrected here - only avoided by clearing it before it syncs.</p>
+    <form method="post" action="/sync">
+        <button type="submit">Sync to Home Assistant</button>
+    </form>
+</div>
+{% else %}
+<div class="card">
+    <p>Home Assistant isn't configured, so there's nothing to sync. Add your
+    HA URL, token, and calendar entity ID on the <a href="/settings">Settings</a>
+    page to enable this.</p>
+</div>
+{% endif %}
+
+{% if let Some(results) = results %}
+<div class="card">
+    <h3>Results</h3>
+    {% if results.synced.is_empty() && results.failed.is_empty() %}
+    <p>Nothing to sync - no eligible entries in the next 14 days.</p>
+    {% endif %}
+
+    {% if !results.synced.is_empty() %}
+    <h4>Synced</h4>
+    <ul>
+        {% for outcome in results.synced %}
+        <li>{{ outcome.entry_date }} - {{ outcome.meal_name }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if !results.failed.is_empty() %}
+    <h4>Failed</h4>
+    <ul>
+        {% for outcome in results.failed %}
+        <li>{{ outcome.entry_date }} - {{ outcome.meal_name }}{% if let Some(error) = outcome.error %}: {{ error }}{% endif %}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

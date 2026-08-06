@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id, m.name, EXISTS (\n             SELECT 1 FROM consumer_meal_preferences p\n             WHERE p.meal_id = m.id\n               AND p.preference = 'dislike'\n               AND p.consumer_id = ANY($1::bigint[])\n           ) AS \"disliked_by_attendee!\"\n         FROM meals m\n         WHERE m.active\n         ORDER BY m.name COLLATE \"C\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "disliked_by_attendee!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "d2b5c08a938061617ea00890e4f3a2555360173087263be7e8a99541b673a6ef"
+}
