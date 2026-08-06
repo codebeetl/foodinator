@@ -325,7 +325,9 @@ button.secondary, .button.secondary {
 }
 
 .checkbox-group label {
+    display: flex;
     flex-direction: row;
+    flex-wrap: nowrap;
     align-items: center;
     font-weight: 500;
     background: var(--color-surface);
@@ -333,6 +335,10 @@ button.secondary, .button.secondary {
     border-radius: var(--radius);
     padding: 0.5rem 0.8rem;
     gap: 0.5rem;
+}
+
+.checkbox-group label input[type="checkbox"] {
+    flex-shrink: 0;
 }
 
 @keyframes fade-in {
@@ -369,7 +375,9 @@ button.secondary, .button.secondary {
 }
 
 .chip {
+    display: flex;
     flex-direction: row;
+    flex-wrap: nowrap;
     align-items: center;
     font-weight: 500;
     background: var(--color-surface);
@@ -377,6 +385,10 @@ button.secondary, .button.secondary {
     border-radius: var(--radius);
     padding: 0.5rem 0.8rem;
     gap: 0.5rem;
+}
+
+.chip input[type="checkbox"] {
+    flex-shrink: 0;
 }
 
 .add-known-consumer {
