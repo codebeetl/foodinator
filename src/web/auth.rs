@@ -18,7 +18,7 @@ pub async fn require_basic_auth(
 
     Response::builder()
         .status(StatusCode::UNAUTHORIZED)
-        .header(header::WWW_AUTHENTICATE, r#"Basic realm="ha-foodinator""#)
+        .header(header::WWW_AUTHENTICATE, r#"Basic realm="foodinator""#)
         .body(axum::body::Body::empty())
         .expect("static response is well-formed")
 }

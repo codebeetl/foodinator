@@ -13,7 +13,7 @@ that network):
 
 ```bash
 docker run --rm \
-  --network ha-foodinator_default \
+  --network foodinator_default \
   -e DATABASE_URL=postgres://foodinator:foodinator@db:5432/foodinator \
   -v "$(pwd)":/app -w /app \
   -v foodinator-cargo-home:/usr/local/cargo \

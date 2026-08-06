@@ -113,8 +113,8 @@ the quick start above, just run detached with a restart policy.
 ```bash
 ssh <user>@<omv-host>
 git clone https://github.com/codebeetl/foodinator.git \
-  /srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator
-cd /srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator
+  /srv/dev-disk-by-uuid-<your-uuid>/appdata/foodinator
+cd /srv/dev-disk-by-uuid-<your-uuid>/appdata/foodinator
 ```
 
 If you manage containers through OMV-Extras' Compose plugin instead of the CLI,
@@ -173,26 +173,26 @@ Then open `http://<omv-host>:8080/plan` in a browser and log in with
 ### Data persistence and backups
 
 Postgres data lives in the named Docker volume `<project-name>_db-data` (the project
-name defaults to the containing directory's name, e.g. `ha-foodinator_db-data` for
+name defaults to the containing directory's name, e.g. `foodinator_db-data` for
 the path above - confirm the exact name with `docker volume ls`). It survives
 `docker compose down` and image rebuilds, but **not** `docker compose down -v`. Back
 it up with:
 
 ```bash
-docker run --rm -v ha-foodinator_db-data:/data -v "$(pwd)":/backup alpine \
-  tar czf /backup/ha-foodinator-db-backup-$(date +%F).tar.gz -C /data .
+docker run --rm -v foodinator_db-data:/data -v "$(pwd)":/backup alpine \
+  tar czf /backup/foodinator-db-backup-$(date +%F).tar.gz -C /data .
 ```
 
 If you'd rather have the database files land directly on an OMV share (for the
 NAS's own backup/snapshot tooling to pick up) instead of inside a Docker-managed
 volume, change the `db` service's volume in `docker-compose.yml` from
 `db-data:/var/lib/postgresql/data` to a bind mount, e.g.
-`/srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator/pgdata:/var/lib/postgresql/data`.
+`/srv/dev-disk-by-uuid-<your-uuid>/appdata/foodinator/pgdata:/var/lib/postgresql/data`.
 
 ### Updating
 
 ```bash
-cd /srv/dev-disk-by-uuid-<your-uuid>/appdata/ha-foodinator
+cd /srv/dev-disk-by-uuid-<your-uuid>/appdata/foodinator
 git pull
 docker compose pull
 docker compose up -d
