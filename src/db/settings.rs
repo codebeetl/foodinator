@@ -84,10 +84,15 @@ pub async fn update(
 }
 
 /// Updates the HA override fields. `ha_url`/`ha_calendar_entity_id` are set
-/// verbatim (None clears the override back to the env-var fallback).
-/// `ha_token` is different: None means "leave whatever's stored untouched" -
-/// the settings form never echoes the real token back, so a blank submission
-/// must not be treated as "clear it."
+/// verbatim (None clears the override back to the env-var fallback), and
+/// since HA only works with every field resolved (see `resolve_ha_config`),
+/// blanking either one is already enough to disable the integration.
+/// `ha_token` stays a special case: the settings form never echoes the real
+/// token back (it's a password field), so a blank submission there means
+/// "leave whatever's stored untouched," not "clear it" - there's no way to
+/// distinguish "user left it blank on purpose" from "field just renders
+/// blank every time" otherwise, and disabling doesn't require clearing it
+/// anyway since blanking the URL or calendar entity ID already does that.
 pub async fn update_ha(
     pool: &PgPool,
     ha_url: Option<&str>,
@@ -197,12 +202,12 @@ mod tests {
             "blank token submission should leave the stored token untouched"
         );
 
-        let cleared = update_ha(&pool, None, None, None).await?;
+        let cleared = update_ha(&pool, None, None, Some("calendar.foodinator")).await?;
         assert_eq!(cleared.ha_url, None, "None should clear the url override");
         assert_eq!(
             cleared.ha_token.as_deref(),
             Some("secret-token"),
-            "token still can't be cleared by a blank submission"
+            "token still can't be cleared by a blank submission - blanking url already disables"
         );
 
         Ok(())

@@ -251,7 +251,7 @@ mod tests {
         );
         assert_eq!(
             updated.ha_calendar_entity_id, None,
-            "blank url/entity-id fields do clear their override"
+            "blank url/entity-id fields do clear their override, which already disables HA"
         );
 
         Ok(())

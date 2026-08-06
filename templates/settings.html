@@ -24,18 +24,22 @@
     </label>
 
     <h3>Home Assistant</h3>
-    <p>Optional - leave all three blank (and unset the matching env vars) to
-    disable Home Assistant syncing entirely. Any field left blank here falls
+    <p>Optional - leaving the URL or calendar entity ID field blank (and its
+    matching env var unset) disables Home Assistant syncing entirely, since
+    all three fields must resolve to a value for it to work. Each field falls
     back to its <code>HA_URL</code>/<code>HA_TOKEN</code>/<code>HA_CALENDAR_ENTITY_ID</code>
-    env var. Sync-related pages and the "Sync" nav link only appear once all
-    three resolve to a value.
+    env var when blank here. The token field is the exception: since it's
+    never shown back to you, leaving it blank on save always keeps whatever
+    token is already stored rather than clearing it - blank the URL or
+    calendar entity ID instead to disable. Sync-related pages and the "Sync"
+    nav link only appear once all three resolve to a value.
     {% if ha_configured %}Currently <strong>configured</strong>.{% else %}Currently <strong>not configured</strong>.{% endif %}</p>
 
     <label>HA URL
         <input type="text" name="ha_url" value="{{ ha_url_input }}" placeholder="http://homeassistant.local:8123">
     </label>
     <label>HA long-lived access token
-        <input type="password" name="ha_token" placeholder="{% if settings.ha_token.is_some() %}Leave blank to keep the saved token{% else %}Not set{% endif %}">
+        <input type="password" name="ha_token" placeholder="{% if settings.ha_token.is_some() %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
     </label>
     <label>HA calendar entity ID
         <input type="text" name="ha_calendar_entity_id" value="{{ ha_calendar_entity_id_input }}" placeholder="calendar.foodinator">
