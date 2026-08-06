@@ -14,7 +14,11 @@ pub fn content_hash(summary: &str, description: &str, start: &str, end: &str) ->
     hasher.update(start.as_bytes());
     hasher.update(0u8.to_le_bytes());
     hasher.update(end.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Embedded in an HA event's description so we can recognize it as ours on read-back,
