@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id, m.name, EXISTS (\n             SELECT 1 FROM consumer_meal_preferences p\n             WHERE p.meal_id = m.id\n               AND p.preference = 'like'\n               AND p.consumer_id = ANY($2::bigint[])\n           ) AS \"liked_by_attendee!\",\n           COALESCE(\n             (SELECT array_agg(c.name ORDER BY c.name COLLATE \"C\")\n              FROM consumer_meal_preferences p\n              JOIN consumers c ON c.id = p.consumer_id\n              WHERE p.meal_id = m.id\n                AND p.preference = 'dislike'\n                AND p.consumer_id = ANY($2::bigint[])),\n             ARRAY[]::text[]\n           ) AS \"disliked_by_attendee_names!\"\n         FROM meals m\n         WHERE m.active AND (m.name ILIKE '%' || $1 || '%' OR similarity(m.name, $1) > 0.2)\n         ORDER BY\n           CASE\n             WHEN lower(m.name) = lower($1) THEN 0\n             WHEN m.name ILIKE $1 || '%' THEN 1\n             ELSE 2\n           END,\n           similarity(m.name, $1) DESC,\n           m.name COLLATE \"C\"\n         LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "liked_by_attendee!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "disliked_by_attendee_names!",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "296667938aa33e12382fc9a8c63924db96e106cf43bf392ffdf1ce3a8ce4e24a"
+}

@@ -57,7 +57,7 @@ pub async fn update(pool: &PgPool, id: i64, name: &str, active: bool) -> sqlx::R
 
 /// Trigram-ranked search for the plan-day meal picker: exact match first, then
 /// prefix match, then similarity - tolerant of typos, unlike plain ILIKE.
-/// `attendee_ids` feeds the same disliked-by-attendee flag as suitability_for_attendees.
+/// `attendee_ids` feeds the same like/dislike annotations as suitability_for_attendees.
 pub async fn search(
     pool: &PgPool,
     q: &str,
@@ -69,9 +69,18 @@ pub async fn search(
         r#"SELECT m.id, m.name, EXISTS (
              SELECT 1 FROM consumer_meal_preferences p
              WHERE p.meal_id = m.id
-               AND p.preference = 'dislike'
+               AND p.preference = 'like'
                AND p.consumer_id = ANY($2::bigint[])
-           ) AS "disliked_by_attendee!"
+           ) AS "liked_by_attendee!",
+           COALESCE(
+             (SELECT array_agg(c.name ORDER BY c.name COLLATE "C")
+              FROM consumer_meal_preferences p
+              JOIN consumers c ON c.id = p.consumer_id
+              WHERE p.meal_id = m.id
+                AND p.preference = 'dislike'
+                AND p.consumer_id = ANY($2::bigint[])),
+             ARRAY[]::text[]
+           ) AS "disliked_by_attendee_names!"
          FROM meals m
          WHERE m.active AND (m.name ILIKE '%' || $1 || '%' OR similarity(m.name, $1) > 0.2)
          ORDER BY
@@ -103,9 +112,18 @@ pub async fn list_top(
         r#"SELECT m.id, m.name, EXISTS (
              SELECT 1 FROM consumer_meal_preferences p
              WHERE p.meal_id = m.id
-               AND p.preference = 'dislike'
+               AND p.preference = 'like'
                AND p.consumer_id = ANY($1::bigint[])
-           ) AS "disliked_by_attendee!"
+           ) AS "liked_by_attendee!",
+           COALESCE(
+             (SELECT array_agg(c.name ORDER BY c.name COLLATE "C")
+              FROM consumer_meal_preferences p
+              JOIN consumers c ON c.id = p.consumer_id
+              WHERE p.meal_id = m.id
+                AND p.preference = 'dislike'
+                AND p.consumer_id = ANY($1::bigint[])),
+             ARRAY[]::text[]
+           ) AS "disliked_by_attendee_names!"
          FROM meals m
          WHERE m.active
          ORDER BY m.name COLLATE "C"
@@ -201,7 +219,35 @@ mod tests {
 
         assert_eq!(results.len(), 1, "inactive meal should be excluded");
         assert_eq!(results[0].name, "Tacos");
-        assert!(results[0].disliked_by_attendee);
+        assert_eq!(results[0].disliked_by_attendee_names, vec!["Alice"]);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn search_reports_liked_by_attendee_and_names_every_disliking_attendee(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = crate::db::consumers::insert(&pool, "Alice").await?;
+        let bob = crate::db::consumers::insert(&pool, "Bob").await?;
+        let charlie = crate::db::consumers::insert(&pool, "Charlie").await?;
+        let tacos = insert(&pool, "Tacos").await?;
+        crate::db::preferences::set(&pool, alice.id, tacos.id, Some("like")).await?;
+        crate::db::preferences::set(&pool, bob.id, tacos.id, Some("dislike")).await?;
+        crate::db::preferences::set(&pool, charlie.id, tacos.id, Some("dislike")).await?;
+
+        let results = search(&pool, "Tacos", &[alice.id, bob.id, charlie.id], 10).await?;
+
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0].liked_by_attendee,
+            "Alice likes it, so this should be true"
+        );
+        assert_eq!(
+            results[0].disliked_by_attendee_names,
+            vec!["Bob", "Charlie"],
+            "every disliking attendee should be named, not just flagged"
+        );
 
         Ok(())
     }

@@ -15,14 +15,18 @@ pub struct MealPlanEntry {
     pub updated_at: DateTime<Utc>,
 }
 
-/// A meal alongside whether any of a given set of attendees dislikes it.
-/// Never excludes - the picker UI flags disliked meals rather than hiding
+/// A meal alongside how a given set of attendees feels about it. Never
+/// excludes - the picker UI flags liked/disliked meals rather than hiding
 /// them, since a hard exclusion could leave the list empty.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MealSuitability {
     pub id: i64,
     pub name: String,
-    pub disliked_by_attendee: bool,
+    pub liked_by_attendee: bool,
+    // Names (not just a bool) so the UI can say who specifically dislikes
+    // it, e.g. "disliked by Alice" - liked attendees aren't named, only
+    // whether any exist (see the picker UI's thumbs-up/down/shrug emoji).
+    pub disliked_by_attendee_names: Vec<String>,
 }
 
 /// Inserts or updates the single meal_plan_entries row for `entry_date`,
@@ -128,7 +132,7 @@ pub async fn get_attendance(pool: &PgPool, meal_plan_entry_id: i64) -> sqlx::Res
 }
 
 /// Given a set of attendee consumer IDs, returns every active meal annotated
-/// with whether any of those attendees dislikes it.
+/// with how those attendees feel about it.
 pub async fn suitability_for_attendees(
     pool: &PgPool,
     attendee_ids: &[i64],
@@ -138,9 +142,18 @@ pub async fn suitability_for_attendees(
         r#"SELECT m.id, m.name, EXISTS (
              SELECT 1 FROM consumer_meal_preferences p
              WHERE p.meal_id = m.id
-               AND p.preference = 'dislike'
+               AND p.preference = 'like'
                AND p.consumer_id = ANY($1::bigint[])
-           ) AS "disliked_by_attendee!"
+           ) AS "liked_by_attendee!",
+           COALESCE(
+             (SELECT array_agg(c.name ORDER BY c.name COLLATE "C")
+              FROM consumer_meal_preferences p
+              JOIN consumers c ON c.id = p.consumer_id
+              WHERE p.meal_id = m.id
+                AND p.preference = 'dislike'
+                AND p.consumer_id = ANY($1::bigint[])),
+             ARRAY[]::text[]
+           ) AS "disliked_by_attendee_names!"
          FROM meals m
          WHERE m.active
          ORDER BY m.name COLLATE "C""#,
@@ -263,12 +276,14 @@ mod tests {
                 MealSuitability {
                     id: pasta.id,
                     name: "Pasta".to_string(),
-                    disliked_by_attendee: false,
+                    liked_by_attendee: false,
+                    disliked_by_attendee_names: vec![],
                 },
                 MealSuitability {
                     id: tacos.id,
                     name: "Tacos".to_string(),
-                    disliked_by_attendee: true,
+                    liked_by_attendee: false,
+                    disliked_by_attendee_names: vec!["Alice".to_string()],
                 },
             ],
             "disliked meal must still be present, just flagged"

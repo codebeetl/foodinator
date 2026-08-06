@@ -18,6 +18,15 @@
       .join(",");
   }
 
+  function preferenceEmoji(item) {
+    const liked = item.liked_by_attendee;
+    const disliked = item.disliked_by_attendee_names && item.disliked_by_attendee_names.length > 0;
+    if (liked && disliked) return "\u{1F937}"; // shrug - opinions are split
+    if (disliked) return "\u{1F44E}"; // thumbs down
+    if (liked) return "\u{1F44D}"; // thumbs up
+    return "";
+  }
+
   function renderResults(items, query) {
     currentItems = items;
     resultsList.innerHTML = "";
@@ -33,9 +42,20 @@
         li.textContent = `+ Create "${item.name}"`;
         li.classList.add("meal-search-create");
       } else {
-        li.textContent = item.name;
-        if (item.disliked_by_attendee) {
-          li.textContent += " (disliked by an attendee)";
+        const label = document.createElement("span");
+        let text = item.name;
+        if (item.disliked_by_attendee_names && item.disliked_by_attendee_names.length > 0) {
+          text += ` (disliked by ${item.disliked_by_attendee_names.join(", ")})`;
+        }
+        label.textContent = text;
+        li.appendChild(label);
+
+        const emoji = preferenceEmoji(item);
+        if (emoji) {
+          const badge = document.createElement("span");
+          badge.className = "meal-search-emoji";
+          badge.textContent = emoji;
+          li.appendChild(badge);
         }
       }
       li.addEventListener("mouseenter", () => setHighlight(index));
