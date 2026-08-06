@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM rust:1-slim AS builder
+FROM rust:1-slim-bookworm AS builder
 WORKDIR /app
 
 # Dependency layer: only invalidated when Cargo.toml/Cargo.lock change, so an

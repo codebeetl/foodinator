@@ -7,7 +7,7 @@ Home Assistant API workaround live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.m
 ## Build, lint, test
 
 Don't assume a local Rust toolchain is available. If one isn't, run everything
-through a `rust:1-slim` container with cached volumes so repeated invocations stay
+through a `rust:1-slim-bookworm` container with cached volumes so repeated invocations stay
 fast (requires `docker compose up -d db` first, so the `db` hostname resolves on
 that network):
 
@@ -19,7 +19,7 @@ docker run --rm \
   -v foodinator-cargo-home:/usr/local/cargo \
   -v foodinator-rustup-home:/usr/local/rustup \
   -v foodinator-target:/app/target \
-  rust:1-slim bash -c "<command>"
+  rust:1-slim-bookworm bash -c "<command>"
 ```
 
 If a local toolchain **is** available, the same `cargo` commands work directly.
