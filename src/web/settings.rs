@@ -9,6 +9,8 @@ use serde::Deserialize;
 use crate::db::settings::{self, AppSettings, HaConfig};
 use crate::state::AppState;
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/settings", get(show).post(update))
@@ -32,6 +34,7 @@ struct SettingsTemplate {
     ha_url_input: String,
     ha_calendar_entity_id_input: String,
     test_result: Option<TestResult>,
+    app_version: &'static str,
 }
 
 fn non_empty(s: &str) -> Option<&str> {
@@ -50,6 +53,7 @@ async fn show(State(state): State<AppState>) -> SettingsTemplate {
         settings,
         ha_configured,
         test_result: None,
+        app_version: APP_VERSION,
     }
 }
 
@@ -149,6 +153,7 @@ async fn test_ha_connection(
         ha_url_input: form.ha_url,
         ha_calendar_entity_id_input: form.ha_calendar_entity_id,
         test_result,
+        app_version: APP_VERSION,
     }
 }
 
@@ -159,6 +164,28 @@ mod tests {
     use axum::http::{header, Request, StatusCode};
     use sqlx::PgPool;
     use tower::ServiceExt;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn show_page_displays_the_app_version(pool: PgPool) -> sqlx::Result<()> {
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(Request::get("/settings").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains(&format!("v{APP_VERSION}")),
+            "settings page should display the app version: {html}"
+        );
+
+        Ok(())
+    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn updating_settings_through_the_form_persists_and_redirects(

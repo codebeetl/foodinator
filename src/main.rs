@@ -1,4 +1,4 @@
 #[tokio::main]
 async fn main() {
-    ha_foodinator::run().await;
+    foodinator::run().await;
 }

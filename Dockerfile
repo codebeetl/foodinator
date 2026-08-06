@@ -17,9 +17,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/target/release/ha-foodinator /app/ha-foodinator
+COPY --from=builder /app/target/release/foodinator /app/foodinator
 COPY --from=builder /app/migrations /app/migrations
 COPY static /app/static
 
 EXPOSE 8080
-ENTRYPOINT ["/app/ha-foodinator"]
+ENTRYPOINT ["/app/foodinator"]

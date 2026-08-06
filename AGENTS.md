@@ -89,3 +89,19 @@ fails CI's `build`, `clippy`, and `sqlx-check` jobs.
   erroring when unconfigured. Follow this pattern for any new optional feature.
 - Commit messages: one line, imperative mood, no body (e.g. `Add /display week data
   and kiosk template`) - matches every commit in this repo's history.
+
+## Releasing
+
+The app's version (shown on the Settings page and baked into the GHCR image tag) is
+read at compile time from `Cargo.toml`'s `version` field
+(`env!("CARGO_PKG_VERSION")` in `src/web/settings.rs`) - there's no separate place to
+update. To cut a release:
+
+1. Bump `version` in `Cargo.toml` following semver (patch for fixes, minor for new
+   backward-compatible features, major for breaking changes) and commit it.
+2. Push, then `gh release create vX.Y.Z` (tag must match the bumped version, prefixed
+   with `v`) with release notes.
+3. `.github/workflows/docker-publish.yml` triggers on the release being published and
+   pushes `ghcr.io/codebeetl/foodinator` tagged both `:latest` and `:vX.Y.Z` - no
+   separate version-bump step needed there, it reads the tag straight off the
+   GitHub Release event.
