@@ -24,6 +24,31 @@ pub async fn list_for_meal(pool: &PgPool, meal_id: i64) -> sqlx::Result<Vec<Cons
     .await
 }
 
+/// Same shape as `list_for_meal`, but for every meal at once - one query for
+/// the meals list page's preferences column instead of one per row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MealConsumerPreference {
+    pub meal_id: i64,
+    pub consumer_id: i64,
+    pub consumer_name: String,
+    pub preference: Option<String>,
+}
+
+pub async fn list_for_all_meals(pool: &PgPool) -> sqlx::Result<Vec<MealConsumerPreference>> {
+    sqlx::query_as!(
+        MealConsumerPreference,
+        r#"SELECT m.id AS meal_id, c.id AS consumer_id, c.name AS consumer_name,
+         cmp.preference AS "preference?"
+         FROM meals m
+         CROSS JOIN consumers c
+         LEFT JOIN consumer_meal_preferences cmp
+           ON cmp.consumer_id = c.id AND cmp.meal_id = m.id
+         ORDER BY m.id, c.id"#
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// Sets a consumer's standing preference for a meal. `preference` of `None`
 /// clears any existing preference (back to "no opinion"), matching how the
 /// edit form's "No opinion" option behaves.
@@ -106,6 +131,52 @@ mod tests {
         set(&pool, alice.id, meal.id, None).await?;
         let prefs = list_for_meal(&pool, meal.id).await?;
         assert_eq!(prefs[0].preference, None);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_for_all_meals_groups_every_consumer_under_each_meal(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = consumers::insert(&pool, "Alice").await?;
+        let bob = consumers::insert(&pool, "Bob").await?;
+        let tacos = meals::insert(&pool, "Tacos").await?;
+        let chili = meals::insert(&pool, "Chili").await?;
+        set(&pool, alice.id, tacos.id, Some("like")).await?;
+        set(&pool, bob.id, chili.id, Some("dislike")).await?;
+
+        let rows = list_for_all_meals(&pool).await?;
+
+        assert_eq!(
+            rows,
+            vec![
+                MealConsumerPreference {
+                    meal_id: tacos.id,
+                    consumer_id: alice.id,
+                    consumer_name: "Alice".to_string(),
+                    preference: Some("like".to_string()),
+                },
+                MealConsumerPreference {
+                    meal_id: tacos.id,
+                    consumer_id: bob.id,
+                    consumer_name: "Bob".to_string(),
+                    preference: None,
+                },
+                MealConsumerPreference {
+                    meal_id: chili.id,
+                    consumer_id: alice.id,
+                    consumer_name: "Alice".to_string(),
+                    preference: None,
+                },
+                MealConsumerPreference {
+                    meal_id: chili.id,
+                    consumer_id: bob.id,
+                    consumer_name: "Bob".to_string(),
+                    preference: Some("dislike".to_string()),
+                },
+            ]
+        );
 
         Ok(())
     }

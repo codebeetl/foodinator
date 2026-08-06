@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id AS meal_id, c.id AS consumer_id, c.name AS consumer_name,\n         cmp.preference AS \"preference?\"\n         FROM meals m\n         CROSS JOIN consumers c\n         LEFT JOIN consumer_meal_preferences cmp\n           ON cmp.consumer_id = c.id AND cmp.meal_id = m.id\n         ORDER BY m.id, c.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "meal_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "consumer_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "consumer_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "preference?",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a7623428fedad23592045c2c40c04158cc95a8a41ec98c63c52a5601faccb776"
+}

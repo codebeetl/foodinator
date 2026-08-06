@@ -400,6 +400,37 @@ button.secondary, .button.secondary {
     display: inline-flex;
 }
 
+.meal-preferences-empty {
+    color: var(--color-text-muted);
+    font-size: 0.85rem;
+}
+
+.meal-preferences summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--color-text-muted);
+}
+
+.meal-preferences summary:hover {
+    color: var(--color-text);
+}
+
+.meal-preferences-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    max-width: 20rem;
+}
+
+.meal-preferences-form label {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 500;
+}
+
 .guest-list {
     display: flex;
     flex-wrap: wrap;

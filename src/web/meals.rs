@@ -23,22 +23,87 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/meals", get(list).post(create))
         .route("/meals/:id", get(edit_form).post(update))
+        .route(
+            "/meals/:id/preferences",
+            axum::routing::post(update_preferences),
+        )
         .route("/api/meals", get(search).post(create_api))
+}
+
+/// One meal plus its per-consumer preferences, pre-grouped for the list
+/// page's collapsible column - `likes`/`dislikes` are counted here rather
+/// than in the template to keep the template free of aggregation logic.
+struct MealRow {
+    meal: Meal,
+    preferences: Vec<ConsumerPreference>,
+    likes: i64,
+    dislikes: i64,
+    // Whether this row's preferences <details> should render open - computed
+    // here (rather than compared against `open` in the template) since
+    // Askama's expression syntax doesn't support the `*deref` this comparison
+    // would otherwise need.
+    is_open: bool,
 }
 
 #[derive(Template)]
 #[template(path = "meals/list.html")]
 struct MealsListTemplate {
-    meals: Vec<Meal>,
+    rows: Vec<MealRow>,
     ha_configured: bool,
 }
 
-async fn list(State(state): State<AppState>) -> MealsListTemplate {
+#[derive(Deserialize)]
+struct ListQuery {
+    // Which row's preferences <details> should render open, e.g. right after
+    // saving it - otherwise the list page always starts fully collapsed.
+    open: Option<i64>,
+}
+
+async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> MealsListTemplate {
     let meals = meals::list_all(&state.pool)
         .await
         .expect("failed to list meals");
+    let pref_rows = preferences::list_for_all_meals(&state.pool)
+        .await
+        .expect("failed to list preferences");
+
+    let mut prefs_by_meal: HashMap<i64, Vec<ConsumerPreference>> = HashMap::new();
+    for row in pref_rows {
+        prefs_by_meal
+            .entry(row.meal_id)
+            .or_default()
+            .push(ConsumerPreference {
+                consumer_id: row.consumer_id,
+                consumer_name: row.consumer_name,
+                preference: row.preference,
+            });
+    }
+
+    let rows = meals
+        .into_iter()
+        .map(|meal| {
+            let preferences = prefs_by_meal.remove(&meal.id).unwrap_or_default();
+            let likes = preferences
+                .iter()
+                .filter(|p| p.preference.as_deref() == Some("like"))
+                .count() as i64;
+            let dislikes = preferences
+                .iter()
+                .filter(|p| p.preference.as_deref() == Some("dislike"))
+                .count() as i64;
+            let is_open = query.open == Some(meal.id);
+            MealRow {
+                meal,
+                preferences,
+                likes,
+                dislikes,
+                is_open,
+            }
+        })
+        .collect();
+
     MealsListTemplate {
-        meals,
+        rows,
         ha_configured: state.ha_client().await.is_some(),
     }
 }
@@ -92,16 +157,15 @@ struct UpdateMealForm {
     preferences: HashMap<String, String>,
 }
 
-async fn update(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-    Form(form): Form<UpdateMealForm>,
-) -> Redirect {
-    meals::update(&state.pool, id, &form.name, form.active.is_some())
-        .await
-        .expect("failed to update meal");
-
-    for (field, value) in &form.preferences {
+/// Applies every `preference_<consumer_id>` field found in a submitted form
+/// to the given meal - shared by the full edit form and the meals list's
+/// per-row preferences form, which both submit the same field naming.
+async fn apply_preference_fields(
+    pool: &sqlx::PgPool,
+    meal_id: i64,
+    fields: &HashMap<String, String>,
+) {
+    for (field, value) in fields {
         let Some(consumer_id) = field
             .strip_prefix(PREFERENCE_FIELD_PREFIX)
             .and_then(|s| s.parse::<i64>().ok())
@@ -113,12 +177,37 @@ async fn update(
         } else {
             Some(value.as_str())
         };
-        preferences::set(&state.pool, consumer_id, id, preference)
+        preferences::set(pool, consumer_id, meal_id, preference)
             .await
             .expect("failed to set preference");
     }
+}
 
+async fn update(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<UpdateMealForm>,
+) -> Redirect {
+    meals::update(&state.pool, id, &form.name, form.active.is_some())
+        .await
+        .expect("failed to update meal");
+    apply_preference_fields(&state.pool, id, &form.preferences).await;
     Redirect::to("/meals")
+}
+
+#[derive(Deserialize)]
+struct UpdatePreferencesForm {
+    #[serde(flatten)]
+    preferences: HashMap<String, String>,
+}
+
+async fn update_preferences(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Form(form): Form<UpdatePreferencesForm>,
+) -> Redirect {
+    apply_preference_fields(&state.pool, id, &form.preferences).await;
+    Redirect::to(&format!("/meals?open={id}#meal-{id}"))
 }
 
 #[derive(Deserialize)]
@@ -268,6 +357,76 @@ mod tests {
 
         let prefs = preferences::list_for_meal(&pool, meal.id).await?;
         assert_eq!(prefs[0].preference.as_deref(), Some("dislike"));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_page_shows_a_preferences_column_with_like_and_dislike_counts(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = crate::db::consumers::insert(&pool, "Alice").await?;
+        let bob = crate::db::consumers::insert(&pool, "Bob").await?;
+        let meal = meals::insert(&pool, "Tacos").await?;
+        preferences::set(&pool, alice.id, meal.id, Some("like")).await?;
+        preferences::set(&pool, bob.id, meal.id, Some("dislike")).await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(Request::get("/meals").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("Likes: 1") && html.contains("Dislikes: 1"),
+            "list page should summarise preference counts: {html}"
+        );
+        assert!(
+            html.contains(&format!("preference_{}", alice.id))
+                && html.contains(&format!("preference_{}", bob.id)),
+            "list page should include an editable field per consumer: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn saving_preferences_from_the_list_page_persists_and_redirects_back_open(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = crate::db::consumers::insert(&pool, "Alice").await?;
+        let meal = meals::insert(&pool, "Tacos").await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let body = format!("preference_{}=like", alice.id);
+        let response = app
+            .oneshot(
+                Request::post(format!("/meals/{}/preferences", meal.id))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(
+            location,
+            format!("/meals?open={}#meal-{}", meal.id, meal.id)
+        );
+
+        let prefs = preferences::list_for_meal(&pool, meal.id).await?;
+        assert_eq!(prefs[0].preference.as_deref(), Some("like"));
 
         Ok(())
     }

@@ -8,13 +8,41 @@
 <div class="table-scroll card">
     <table>
         <thead>
-            <tr><th>Name</th><th>Status</th></tr>
+            <tr><th>Name</th><th>Status</th><th>Preferences</th></tr>
         </thead>
         <tbody>
-            {% for meal in meals %}
-            <tr>
-                <td><a class="row-link" href="/meals/{{ meal.id }}">{{ meal.name }}</a></td>
-                <td>{% call macros::status_badge(meal.active) %}</td>
+            {% for row in rows %}
+            <tr id="meal-{{ row.meal.id }}">
+                <td><a class="row-link" href="/meals/{{ row.meal.id }}">{{ row.meal.name }}</a></td>
+                <td>{% call macros::status_badge(row.meal.active) %}</td>
+                <td>
+                    {% if row.preferences.is_empty() %}
+                    <span class="meal-preferences-empty">No consumers yet</span>
+                    {% else %}
+                    <details class="meal-preferences" {% if row.is_open %}open{% endif %}>
+                        <summary>
+                            {% if row.likes == 0 && row.dislikes == 0 %}
+                            No preferences set
+                            {% else %}
+                            Likes: {{ row.likes }} &middot; Dislikes: {{ row.dislikes }}
+                            {% endif %}
+                        </summary>
+                        <form method="post" action="/meals/{{ row.meal.id }}/preferences" class="meal-preferences-form">
+                            {% for pref in row.preferences %}
+                            <label>
+                                {{ pref.consumer_name }}
+                                <select name="preference_{{ pref.consumer_id }}">
+                                    <option value="" {% if pref.preference.is_none() %}selected{% endif %}>No opinion</option>
+                                    <option value="like" {% if let Some(p) = pref.preference %}{% if p == "like" %}selected{% endif %}{% endif %}>Likes</option>
+                                    <option value="dislike" {% if let Some(p) = pref.preference %}{% if p == "dislike" %}selected{% endif %}{% endif %}>Dislikes</option>
+                                </select>
+                            </label>
+                            {% endfor %}
+                            <button type="submit" class="secondary">Save</button>
+                        </form>
+                    </details>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
