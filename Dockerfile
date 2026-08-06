@@ -2,13 +2,24 @@
 FROM rust:1-slim AS builder
 WORKDIR /app
 
+# Dependency layer: only invalidated when Cargo.toml/Cargo.lock change, so an
+# ordinary source-only change reuses this instead of recompiling every crate.
 COPY Cargo.toml Cargo.lock ./
+RUN mkdir src \
+    && echo "fn main() {}" > src/main.rs \
+    && echo "" > src/lib.rs
+ENV SQLX_OFFLINE=true
+RUN cargo build --release \
+    && rm -rf src \
+       target/release/deps/foodinator-* \
+       target/release/deps/libfoodinator-* \
+       target/release/foodinator
+
+# Source layer: only this recompiles on a normal code change.
 COPY .sqlx ./.sqlx
 COPY src ./src
 COPY migrations ./migrations
 COPY templates ./templates
-
-ENV SQLX_OFFLINE=true
 RUN cargo build --release
 
 FROM debian:bookworm-slim AS runtime
