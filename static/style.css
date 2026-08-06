@@ -11,6 +11,7 @@
     --color-danger: #b3261e;
     --color-like: #2f7d5f;
     --color-dislike: #b3261e;
+    --bg-image: url("/static/bg-light.png");
 
     --radius: 0.6rem;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
@@ -34,6 +35,7 @@
         --color-accent-contrast: #0c1310;
         --color-like: #4fbf8f;
         --color-dislike: #e2645c;
+        --bg-image: url("/static/bg-dark.png");
     }
 }
 
@@ -51,6 +53,7 @@
     --color-accent-contrast: #ffffff;
     --color-like: #2f7d5f;
     --color-dislike: #b3261e;
+    --bg-image: url("/static/bg-light.png");
 }
 
 :root[data-theme="dark"] {
@@ -64,6 +67,7 @@
     --color-accent-contrast: #0c1310;
     --color-like: #4fbf8f;
     --color-dislike: #e2645c;
+    --bg-image: url("/static/bg-dark.png");
 }
 
 /* Progressive enhancement: animated cross-page transitions where supported,
@@ -82,9 +86,15 @@ html {
 
 body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    background: var(--color-bg);
+    background-color: var(--color-bg);
+    background-image: var(--bg-image);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
     color: var(--color-text);
     margin: 0;
+    min-height: 100vh;
     line-height: 1.5;
     animation: fade-in var(--transition-medium);
 }
