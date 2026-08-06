@@ -357,6 +357,28 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
+    async fn list_page_heading_shows_the_total_meal_count(pool: PgPool) -> sqlx::Result<()> {
+        meals::insert(&pool, "Tacos").await?;
+        meals::insert(&pool, "Pizza").await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(Request::get("/meals").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("Meals (2)"),
+            "heading should show the total meal count: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
     async fn submitting_a_duplicate_meal_name_redirects_with_a_notice_instead_of_erroring(
         pool: PgPool,
     ) -> sqlx::Result<()> {
