@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use askama::Template;
 use axum::extract::{Form, Path, Query, State};
-use axum::response::Redirect;
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
@@ -20,8 +20,8 @@ const GUEST_FIELD_PREFIX: &str = "guest_name_";
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/plan", get(show))
-        .route("/plan/:date", post(update))
-        .route("/plan/:date/delete", post(delete))
+        .route("/plan/{date}", post(update))
+        .route("/plan/{date}/delete", post(delete))
 }
 
 /// The nearest date whose weekday matches `week_start_weekday`
@@ -73,6 +73,12 @@ struct PlanTemplate {
     ha_configured: bool,
     display_configured: bool,
     theme: String,
+}
+
+impl IntoResponse for PlanTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
 }
 
 #[derive(Deserialize)]

@@ -14,7 +14,7 @@
             {% for consumer in consumers %}
             <tr>
                 <td>{{ consumer.name }}</td>
-                <td>{% call macros::status_badge(consumer.active) %}</td>
+                <td>{% call macros::status_badge(consumer.active) %}{% endcall %}</td>
                 <td>
                     <form method="post" action="/consumers/{{ consumer.id }}" class="inline">
                         <label>

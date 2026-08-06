@@ -146,6 +146,12 @@ struct DisplayTemplate {
     days: Vec<DisplayDay>,
 }
 
+impl IntoResponse for DisplayTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
+}
+
 async fn show(State(state): State<AppState>, Query(query): Query<DisplayQuery>) -> Response {
     if let Err(status) = authorize(&state, query.token.as_deref()) {
         return status.into_response();
@@ -181,6 +187,12 @@ struct DisplayPreviewTemplate {
     ha_configured: bool,
     display_configured: bool,
     theme: String,
+}
+
+impl IntoResponse for DisplayPreviewTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
 }
 
 async fn preview(State(state): State<AppState>) -> Response {

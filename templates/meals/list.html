@@ -14,7 +14,7 @@
             {% for row in rows %}
             <tr id="meal-{{ row.meal.id }}">
                 <td><a class="row-link" href="/meals/{{ row.meal.id }}">{{ row.meal.name }}</a></td>
-                <td>{% call macros::status_badge(row.meal.active) %}</td>
+                <td>{% call macros::status_badge(row.meal.active) %}{% endcall %}</td>
                 <td>
                     {% if row.preferences.is_empty() %}
                     <span class="meal-preferences-empty">No consumers yet</span>

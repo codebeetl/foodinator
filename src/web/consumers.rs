@@ -1,6 +1,6 @@
 use askama::Template;
 use axum::extract::{Form, Path, State};
-use axum::response::Redirect;
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
@@ -11,7 +11,7 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/consumers", get(list).post(create))
-        .route("/consumers/:id", axum::routing::post(update))
+        .route("/consumers/{id}", axum::routing::post(update))
 }
 
 #[derive(Template)]
@@ -21,6 +21,12 @@ struct ConsumersListTemplate {
     ha_configured: bool,
     display_configured: bool,
     theme: String,
+}
+
+impl IntoResponse for ConsumersListTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
 }
 
 async fn list(State(state): State<AppState>) -> ConsumersListTemplate {

@@ -8,8 +8,9 @@ mod plan;
 mod settings;
 mod sync;
 
+use axum::http::StatusCode;
 use axum::middleware;
-use axum::response::Redirect;
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -19,6 +20,17 @@ use crate::state::AppState;
 
 async fn root() -> Redirect {
     Redirect::to("/plan")
+}
+
+/// askama_axum is deprecated and gone as of askama 0.13 - this is the
+/// officially recommended replacement (render, then build the response by
+/// hand), shared so every Template struct's `impl IntoResponse` is a
+/// one-line call instead of repeating the render/error-handling match.
+pub(crate) fn render_askama_template<T: askama::Template>(template: T) -> Response {
+    match template.render() {
+        Ok(html) => Html(html).into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
 }
 
 pub fn router(state: AppState) -> Router {

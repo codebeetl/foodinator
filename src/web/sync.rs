@@ -1,5 +1,6 @@
 use askama::Template;
 use axum::extract::State;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use chrono::{Duration, NaiveDate};
@@ -36,6 +37,12 @@ struct SyncTemplate {
     display_configured: bool,
     theme: String,
     results: Option<SyncResults>,
+}
+
+impl IntoResponse for SyncTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
 }
 
 async fn show(State(state): State<AppState>) -> SyncTemplate {

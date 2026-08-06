@@ -1,6 +1,6 @@
 use askama::Template;
 use axum::extract::{Form, State};
-use axum::response::Redirect;
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use chrono::NaiveTime;
@@ -37,6 +37,12 @@ struct SettingsTemplate {
     ha_calendar_entity_id_input: String,
     test_result: Option<TestResult>,
     app_version: &'static str,
+}
+
+impl IntoResponse for SettingsTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
 }
 
 fn non_empty(s: &str) -> Option<&str> {

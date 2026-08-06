@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use askama::Template;
 use axum::extract::{Form, Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::Redirect;
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -22,10 +22,10 @@ const SEARCH_RESULT_LIMIT: i64 = 10;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/meals", get(list).post(create))
-        .route("/meals/:id", get(edit_form).post(update))
-        .route("/meals/:id/delete", axum::routing::post(delete))
+        .route("/meals/{id}", get(edit_form).post(update))
+        .route("/meals/{id}/delete", axum::routing::post(delete))
         .route(
-            "/meals/:id/preferences",
+            "/meals/{id}/preferences",
             axum::routing::post(update_preferences),
         )
         .route("/api/meals", get(search).post(create_api))
@@ -54,6 +54,12 @@ struct MealsListTemplate {
     ha_configured: bool,
     display_configured: bool,
     theme: String,
+}
+
+impl IntoResponse for MealsListTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
 }
 
 #[derive(Deserialize)]
@@ -152,6 +158,12 @@ struct MealEditTemplate {
     ha_configured: bool,
     display_configured: bool,
     theme: String,
+}
+
+impl IntoResponse for MealEditTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
 }
 
 #[derive(Deserialize)]
