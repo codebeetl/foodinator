@@ -163,6 +163,20 @@ h2 {
     overflow-x: auto;
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
+    /* Scroll-shadow hint: opaque cover gradients scroll with the content and
+       hide themselves once you're scrolled past their edge, while the darker
+       shadow gradients stay fixed to the viewport - the classic pure-CSS way
+       to show "there's more this way" without JS or a scrollbar. */
+    background:
+        linear-gradient(to right, var(--color-surface) 30%, transparent),
+        linear-gradient(to left, var(--color-surface) 30%, transparent) 100% 0,
+        linear-gradient(to right, rgba(0, 0, 0, 0.15), transparent),
+        linear-gradient(to left, rgba(0, 0, 0, 0.15), transparent) 100% 0;
+    background-repeat: no-repeat;
+    background-color: var(--color-surface);
+    background-size: 2.5rem 100%, 2.5rem 100%, 0.9rem 100%, 0.9rem 100%;
+    background-position: 0 0, 100% 0, 0 0, 100% 0;
+    background-attachment: local, local, scroll, scroll;
 }
 
 table {
