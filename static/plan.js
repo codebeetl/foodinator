@@ -140,10 +140,13 @@
 
   function openPicker(picker) {
     activePicker = picker;
-    searchInput.value = "";
+    const mealIdInput = picker.querySelector('input[name="meal_id"]');
+    const currentName = picker.querySelector(".meal-picker-trigger").textContent.trim();
+    searchInput.value = mealIdInput.value ? currentName : "";
     dialog.showModal();
     searchInput.focus();
-    fetchResults("", attendeeIdsFor(picker));
+    searchInput.select();
+    fetchResults(searchInput.value, attendeeIdsFor(picker));
   }
 
   document.addEventListener("click", (event) => {
