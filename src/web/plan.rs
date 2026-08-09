@@ -65,9 +65,9 @@ struct PlanTemplate {
     week_start: NaiveDate,
     prev_start: NaiveDate,
     next_start: NaiveDate,
-    // Only set when week_start isn't already the current week, so the
+    // Only set when week_start isn't already the upcoming week, so the
     // template can hide the link rather than show a no-op jump to itself.
-    current_week_start: Option<NaiveDate>,
+    upcoming_week_start: Option<NaiveDate>,
     days: Vec<PlanDay>,
     consumers: Vec<Consumer>,
     ha_configured: bool,
@@ -90,11 +90,11 @@ async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> 
     let app_settings = settings::get(&state.pool)
         .await
         .expect("failed to load settings");
-    let this_week_start = next_week_start(
+    let upcoming_week_start = next_week_start(
         clock::today(&state.household_tz),
         app_settings.week_start_weekday,
     );
-    let week_start = query.start.unwrap_or(this_week_start);
+    let week_start = query.start.unwrap_or(upcoming_week_start);
 
     let consumers: Vec<Consumer> = consumers::list_all(&state.pool)
         .await
@@ -166,7 +166,7 @@ async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> 
         week_start,
         prev_start: week_start - Duration::days(7),
         next_start: week_start + Duration::days(7),
-        current_week_start: (week_start != this_week_start).then_some(this_week_start),
+        upcoming_week_start: (week_start != upcoming_week_start).then_some(upcoming_week_start),
         days,
         consumers,
         ha_configured: state.ha_client().await.is_some(),
@@ -527,11 +527,11 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn jump_to_current_week_link_is_hidden_when_already_on_the_current_week(
+    async fn jump_to_upcoming_week_link_is_hidden_when_already_on_the_upcoming_week(
         pool: PgPool,
     ) -> sqlx::Result<()> {
-        // No `start` query param: show() falls back to today's week, so this
-        // is always the current week regardless of when the test runs.
+        // No `start` query param: show() falls back to the upcoming week, so
+        // this is always the upcoming week regardless of when the test runs.
         let app = router().with_state(crate::state::test_app_state(pool));
 
         let response = app
@@ -544,15 +544,15 @@ mod tests {
             .unwrap();
         let html = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            !html.contains("This week"),
-            "jump-to-current-week link should be hidden when already viewing it: {html}"
+            !html.contains("Next unplanned week"),
+            "jump-to-upcoming-week link should be hidden when already viewing it: {html}"
         );
 
         Ok(())
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn jump_to_current_week_link_is_shown_when_viewing_a_different_week(
+    async fn jump_to_upcoming_week_link_is_shown_when_viewing_a_different_week(
         pool: PgPool,
     ) -> sqlx::Result<()> {
         let app = router().with_state(crate::state::test_app_state(pool));
@@ -571,8 +571,8 @@ mod tests {
             .unwrap();
         let html = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            html.contains("This week"),
-            "jump-to-current-week link should show when browsing a different week: {html}"
+            html.contains("Next unplanned week"),
+            "jump-to-upcoming-week link should show when browsing a different week: {html}"
         );
 
         Ok(())

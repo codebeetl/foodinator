@@ -6,8 +6,8 @@
 <h2>Meal plan</h2>
 <nav class="week-nav" aria-label="Week navigation">
     <a href="/plan?start={{ prev_start }}">&larr; Previous week</a>
-    {% if let Some(current) = current_week_start %}
-    <a href="/plan?start={{ current }}">This week</a>
+    {% if let Some(upcoming) = upcoming_week_start %}
+    <a href="/plan?start={{ upcoming }}">Next unplanned week</a>
     {% endif %}
     <a href="/plan?start={{ next_start }}">Next week &rarr;</a>
 </nav>
