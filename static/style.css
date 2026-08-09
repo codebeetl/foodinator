@@ -634,6 +634,17 @@ button.secondary, .button.secondary {
     flex-shrink: 0;
 }
 
+.meal-search-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.meal-search-last-planned {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+}
+
 .display-preview-frame {
     width: 100%;
     height: 60vh;

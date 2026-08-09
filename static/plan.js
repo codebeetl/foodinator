@@ -55,11 +55,24 @@
         li.classList.add("meal-search-create");
       } else {
         const label = document.createElement("span");
+        label.className = "meal-search-label";
+
+        const nameLine = document.createElement("span");
         let text = item.name;
         if (item.disliked_by_attendee_names && item.disliked_by_attendee_names.length > 0) {
           text += ` (disliked by ${item.disliked_by_attendee_names.join(", ")})`;
         }
-        label.textContent = text;
+        nameLine.textContent = text;
+        label.appendChild(nameLine);
+
+        if (item.last_planned) {
+          const lastPlannedLine = document.createElement("span");
+          lastPlannedLine.className = "meal-search-last-planned";
+          lastPlannedLine.textContent =
+            item.last_planned === "Never" ? "Never planned" : `Last planned ${item.last_planned}`;
+          label.appendChild(lastPlannedLine);
+        }
+
         li.appendChild(label);
 
         const emoji = preferenceEmoji(item);

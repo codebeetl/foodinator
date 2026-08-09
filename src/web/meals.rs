@@ -9,7 +9,6 @@ use axum::{Json, Router};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-use crate::db::meal_plan::MealSuitability;
 use crate::db::meals::{self, Meal};
 use crate::db::preferences::{self, ConsumerPreference};
 use crate::state::AppState;
@@ -357,10 +356,24 @@ fn parse_attendee_ids(raw: Option<&str>) -> Vec<i64> {
         .collect()
 }
 
+/// A search result plus its last-planned date, formatted the same way as
+/// the meals list page's "Last planned" column - kept as a separate JSON DTO
+/// rather than a field on `MealSuitability` itself, since that struct is
+/// shared with `suitability_for_attendees` (used only to resolve a selected
+/// meal's name in `build_plan_day`), which has no use for it.
+#[derive(Serialize, Deserialize)]
+struct SearchResult {
+    id: i64,
+    name: String,
+    liked_by_attendee: bool,
+    disliked_by_attendee_names: Vec<String>,
+    last_planned: String,
+}
+
 async fn search(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,
-) -> Json<Vec<MealSuitability>> {
+) -> Json<Vec<SearchResult>> {
     let attendee_ids = parse_attendee_ids(query.attendee_ids.as_deref());
     let q = query.q.as_deref().unwrap_or("").trim();
 
@@ -370,6 +383,24 @@ async fn search(
         meals::search(&state.pool, q, &attendee_ids, SEARCH_RESULT_LIMIT).await
     }
     .expect("failed to search meals");
+
+    let mut last_planned_dates = meals::last_planned_dates(&state.pool)
+        .await
+        .expect("failed to list last-planned dates");
+
+    let results = results
+        .into_iter()
+        .map(|m| SearchResult {
+            last_planned: last_planned_dates
+                .remove(&m.id)
+                .map(|date| date.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "Never".to_string()),
+            id: m.id,
+            name: m.name,
+            liked_by_attendee: m.liked_by_attendee,
+            disliked_by_attendee_names: m.disliked_by_attendee_names,
+        })
+        .collect();
 
     Json(results)
 }
@@ -917,7 +948,7 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let results: Vec<MealSuitability> = serde_json::from_slice(&body).unwrap();
+        let results: Vec<SearchResult> = serde_json::from_slice(&body).unwrap();
         assert_eq!(results[0].name, "Tacos", "exact match ranks first");
 
         let empty_query_response = app
@@ -928,11 +959,42 @@ mod tests {
         let body = axum::body::to_bytes(empty_query_response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let results: Vec<MealSuitability> = serde_json::from_slice(&body).unwrap();
+        let results: Vec<SearchResult> = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             results.iter().map(|m| &m.name).collect::<Vec<_>>(),
             vec!["Taco Salad", "Tacos"],
             "no query should list everything alphabetically"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn search_endpoint_includes_each_meals_last_planned_date(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = meals::insert(&pool, "Tacos").await?;
+        meals::insert(&pool, "Pasta").await?;
+        let today = chrono::Utc::now().date_naive();
+        crate::db::meal_plan::upsert_entry(&pool, today, tacos.id, None, None, None, &[]).await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(Request::get("/api/meals").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let results: Vec<SearchResult> = serde_json::from_slice(&body).unwrap();
+
+        let pasta = results.iter().find(|m| m.name == "Pasta").unwrap();
+        assert_eq!(pasta.last_planned, "Never");
+        let tacos_result = results.iter().find(|m| m.name == "Tacos").unwrap();
+        assert_eq!(
+            tacos_result.last_planned,
+            today.format("%Y-%m-%d").to_string()
         );
 
         Ok(())
