@@ -259,6 +259,12 @@
     const isClearForm = form.matches(".plan-day form.inline");
     if (!isPlanDayForm && !isClearForm) return;
 
+    // The clear form's onsubmit attribute (confirm() dialog) runs before this
+    // delegated listener since it's attached directly to the form - if the
+    // user cancelled, defaultPrevented is already true and the AJAX clear
+    // below must not fire.
+    if (event.defaultPrevented) return;
+
     if (isPlanDayForm) {
       const mealIdInput = form.querySelector('input[name="meal_id"]');
       if (!mealIdInput.value) {

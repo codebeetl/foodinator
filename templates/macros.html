@@ -69,7 +69,8 @@
         </label>
     </form>
     {% if day.has_entry %}
-    <form method="post" action="/plan/{{ day.date }}/delete" class="inline">
+    <form method="post" action="/plan/{{ day.date }}/delete" class="inline"
+          onsubmit="return confirm('Clear this day? This cannot be undone.');">
         <input type="hidden" name="week_start" value="{{ week_start }}">
         <button type="submit" class="secondary">Clear this day</button>
     </form>
