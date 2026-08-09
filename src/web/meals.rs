@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::db::meal_plan::MealSuitability;
@@ -44,6 +45,10 @@ struct MealRow {
     // Askama's expression syntax doesn't support the `*deref` this comparison
     // would otherwise need.
     is_open: bool,
+    // Raw date kept alongside the formatted string below so the list can be
+    // sorted on it (None sorts before every date, which is exactly "never
+    // planned" ranking as most overdue) without re-parsing the display text.
+    last_planned_date: Option<NaiveDate>,
     // Pre-formatted (ISO date, or "Never") rather than a raw NaiveDate, again
     // to keep formatting logic out of the template.
     last_planned: String,
@@ -57,6 +62,8 @@ struct MealsListTemplate {
     ha_configured: bool,
     display_configured: bool,
     theme: String,
+    sort: String,
+    dir: String,
 }
 
 impl IntoResponse for MealsListTemplate {
@@ -76,6 +83,12 @@ struct ListQuery {
     // past it (JS disabled, a name added in another tab moments earlier).
     #[serde(default)]
     duplicate: bool,
+    // "name" | "status" | "preferences" | "last_planned" - anything else
+    // (including absent) falls back to the default name sort.
+    sort: Option<String>,
+    // "asc" | "desc" - anything other than exactly "desc" is treated as
+    // ascending, matching each column's documented ascending order.
+    dir: Option<String>,
 }
 
 async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> MealsListTemplate {
@@ -85,7 +98,7 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
     let pref_rows = preferences::list_for_all_meals(&state.pool)
         .await
         .expect("failed to list preferences");
-    let mut last_planned = meals::last_planned_dates(&state.pool)
+    let mut last_planned_dates = meals::last_planned_dates(&state.pool)
         .await
         .expect("failed to list last-planned dates");
 
@@ -101,7 +114,7 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
             });
     }
 
-    let rows = meals
+    let mut rows: Vec<MealRow> = meals
         .into_iter()
         .map(|meal| {
             let preferences = prefs_by_meal.remove(&meal.id).unwrap_or_default();
@@ -114,8 +127,8 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
                 .filter(|p| p.preference.as_deref() == Some("dislike"))
                 .count() as i64;
             let is_open = query.open == Some(meal.id);
-            let last_planned = last_planned
-                .remove(&meal.id)
+            let last_planned_date = last_planned_dates.remove(&meal.id);
+            let last_planned = last_planned_date
                 .map(|date| date.format("%Y-%m-%d").to_string())
                 .unwrap_or_else(|| "Never".to_string());
             MealRow {
@@ -124,13 +137,44 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
                 likes,
                 dislikes,
                 is_open,
+                last_planned_date,
                 last_planned,
             }
         })
         .collect();
 
+    let sort = query.sort.unwrap_or_else(|| "name".to_string());
+    match sort.as_str() {
+        "status" => rows.sort_by(|a, b| {
+            std::cmp::Reverse(a.meal.active)
+                .cmp(&std::cmp::Reverse(b.meal.active))
+                .then_with(|| a.meal.name.cmp(&b.meal.name))
+        }),
+        "preferences" => rows.sort_by(|a, b| {
+            b.likes
+                .cmp(&a.likes)
+                .then_with(|| a.meal.name.cmp(&b.meal.name))
+        }),
+        "last_planned" => rows.sort_by(|a, b| {
+            a.last_planned_date
+                .cmp(&b.last_planned_date)
+                .then_with(|| a.meal.name.cmp(&b.meal.name))
+        }),
+        _ => rows.sort_by(|a, b| a.meal.name.cmp(&b.meal.name)),
+    }
+    let ascending = query.dir.as_deref() != Some("desc");
+    if !ascending {
+        rows.reverse();
+    }
+
     MealsListTemplate {
         rows,
+        sort,
+        dir: if ascending {
+            "asc".to_string()
+        } else {
+            "desc".to_string()
+        },
         duplicate: query.duplicate,
         ha_configured: state.ha_client().await.is_some(),
         display_configured: state.display_token.is_some(),
@@ -415,6 +459,143 @@ mod tests {
         assert!(
             html.contains("Meals (2)"),
             "heading should show the total meal count: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn default_list_order_is_alphabetical_by_name(pool: PgPool) -> sqlx::Result<()> {
+        meals::insert(&pool, "Zucchini Bake").await?;
+        meals::insert(&pool, "Apple Pie").await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(Request::get("/meals").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.find(">Apple Pie<").unwrap() < html.find(">Zucchini Bake<").unwrap(),
+            "default order should be alphabetical by name: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn sorting_by_status_puts_active_meals_before_inactive_when_ascending(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        meals::insert(&pool, "Active Meal").await?;
+        let inactive = meals::insert(&pool, "Inactive Meal").await?;
+        meals::update(&pool, inactive.id, &inactive.name, false).await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(
+                Request::get("/meals?sort=status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.find(">Active Meal<").unwrap() < html.find(">Inactive Meal<").unwrap(),
+            "ascending status sort should list active meals first: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn sorting_by_preferences_puts_most_liked_meals_first_when_ascending(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let liked = meals::insert(&pool, "Liked Meal").await?;
+        meals::insert(&pool, "Unliked Meal").await?;
+        let consumer = crate::db::consumers::insert(&pool, "Alex").await?;
+        preferences::set(&pool, consumer.id, liked.id, Some("like")).await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(
+                Request::get("/meals?sort=preferences")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.find(">Liked Meal<").unwrap() < html.find(">Unliked Meal<").unwrap(),
+            "ascending preferences sort should list most-liked meals first: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn sorting_by_last_planned_puts_never_planned_meals_first_when_ascending(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let planned = meals::insert(&pool, "Planned Meal").await?;
+        meals::insert(&pool, "Never Planned Meal").await?;
+        let today = chrono::Utc::now().date_naive();
+        crate::db::meal_plan::upsert_entry(&pool, today, planned.id, None, None, None, &[]).await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(
+                Request::get("/meals?sort=last_planned")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.find(">Never Planned Meal<").unwrap() < html.find(">Planned Meal<").unwrap(),
+            "ascending last-planned sort should list never-planned meals first: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn dir_desc_reverses_the_current_sort_order(pool: PgPool) -> sqlx::Result<()> {
+        meals::insert(&pool, "Apple Pie").await?;
+        meals::insert(&pool, "Zucchini Bake").await?;
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(
+                Request::get("/meals?sort=name&dir=desc")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.find(">Zucchini Bake<").unwrap() < html.find(">Apple Pie<").unwrap(),
+            "dir=desc should reverse the ascending order: {html}"
         );
 
         Ok(())

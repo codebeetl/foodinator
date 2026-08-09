@@ -8,7 +8,12 @@
 <div class="table-scroll card">
     <table id="meals-table">
         <thead>
-            <tr><th>Name</th><th>Status</th><th>Preferences</th><th>Last planned</th></tr>
+            <tr>
+                <th>{% call macros::sort_header("Name", "name", sort, dir) %}{% endcall %}</th>
+                <th>{% call macros::sort_header("Status", "status", sort, dir) %}{% endcall %}</th>
+                <th>{% call macros::sort_header("Preferences", "preferences", sort, dir) %}{% endcall %}</th>
+                <th>{% call macros::sort_header("Last planned", "last_planned", sort, dir) %}{% endcall %}</th>
+            </tr>
         </thead>
         <tbody>
             {% for row in rows %}

@@ -2,6 +2,10 @@
 {% if active %}<span class="badge badge-active">Active</span>{% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
 {% endmacro %}
 
+{% macro sort_header(label, key, current_sort, current_dir) %}
+<a class="sort-header" href="/meals?sort={{ key }}&amp;dir={% if current_sort == key && current_dir == "asc" %}desc{% else %}asc{% endif %}">{{ label }}{% if current_sort == key %}{% if current_dir == "asc" %} &#9650;{% else %} &#9660;{% endif %}{% endif %}</a>
+{% endmacro %}
+
 {% macro plan_day_card(day, week_start, consumers) %}
 <div class="card plan-day">
     <h3>{{ day.date_label }}</h3>
