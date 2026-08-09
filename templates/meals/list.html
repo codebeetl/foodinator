@@ -6,13 +6,13 @@
 {% block content %}
 <h2>Meals ({{ rows.len() }})</h2>
 <div class="table-scroll card">
-    <table>
+    <table id="meals-table">
         <thead>
             <tr><th>Name</th><th>Status</th><th>Preferences</th></tr>
         </thead>
         <tbody>
             {% for row in rows %}
-            <tr id="meal-{{ row.meal.id }}">
+            <tr id="meal-{{ row.meal.id }}" data-name="{{ row.meal.name }}">
                 <td><a class="row-link" href="/meals/{{ row.meal.id }}">{{ row.meal.name }}</a></td>
                 <td>{% call macros::status_badge(row.meal.active) %}{% endcall %}</td>
                 <td>
@@ -55,7 +55,6 @@
 {% endif %}
 <form method="post" action="/meals" class="add-meal-form">
     <label>Name <input type="text" name="name" id="add-meal-name" autocomplete="off" required></label>
-    <ul id="add-meal-suggestions" class="meal-search-suggestions" hidden></ul>
     <p id="add-meal-duplicate-note" class="add-meal-duplicate-note" hidden>This meal already exists.</p>
     <button type="submit" id="add-meal-submit">Add</button>
 </form>
