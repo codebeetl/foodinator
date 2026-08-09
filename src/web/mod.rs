@@ -33,6 +33,15 @@ pub(crate) fn render_askama_template<T: askama::Template>(template: T) -> Respon
     }
 }
 
+/// A plain HTML form POST never sends this header - only script-driven
+/// fetch() calls do - so this distinguishes an AJAX request wanting a
+/// re-rendered fragment back from a real navigation wanting a redirect.
+pub(crate) fn is_ajax_request(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("X-Requested-With")
+        .is_some_and(|v| v == "XMLHttpRequest")
+}
+
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/", get(root))

@@ -233,15 +233,39 @@
     input.focus();
   }
 
-  // A blank meal_id (native validation doesn't apply to hidden inputs) should
-  // reopen the picker instead of round-tripping to the server for a 422.
-  document.querySelectorAll(".plan-day-form").forEach((form) => {
-    form.addEventListener("submit", (event) => {
+  async function submitFormAjax(form) {
+    const card = form.closest(".plan-day");
+    const response = await fetch(form.action, {
+      method: "POST",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      body: new URLSearchParams(new FormData(form)),
+    });
+    if (!response.ok) return;
+    const html = await response.text();
+    activePicker = null;
+    card.outerHTML = html;
+  }
+
+  // Delegated so it keeps working after a card is replaced via outerHTML - a
+  // blank meal_id (native validation doesn't apply to hidden inputs) reopens
+  // the picker instead of round-tripping to the server for a 422; every other
+  // plan-day/clear-day submit is routed through AJAX instead of navigating.
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    const isPlanDayForm = form.matches(".plan-day-form");
+    const isClearForm = form.matches(".plan-day form.inline");
+    if (!isPlanDayForm && !isClearForm) return;
+
+    if (isPlanDayForm) {
       const mealIdInput = form.querySelector('input[name="meal_id"]');
       if (!mealIdInput.value) {
         event.preventDefault();
         openPicker(form.querySelector(".meal-picker"));
+        return;
       }
-    });
+    }
+
+    event.preventDefault();
+    submitFormAjax(form);
   });
 })();

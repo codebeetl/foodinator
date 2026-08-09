@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "macros.html" as macros %}
 
 {% block title %}Plan - Foodinator{% endblock %}
 
@@ -14,74 +15,7 @@
 
 <div class="plan-grid">
     {% for day in days %}
-    <div class="card plan-day">
-        <h3>{{ day.date_label }}</h3>
-        <form method="post" action="/plan/{{ day.date }}" class="plan-day-form">
-            <input type="hidden" name="week_start" value="{{ week_start }}">
-
-            <div class="meal-picker">
-                <input type="hidden" name="meal_id" value="{% if let Some(id) = day.selected_meal_id %}{{ id }}{% endif %}">
-                <label>Meal
-                    <button type="button" class="meal-picker-trigger">
-                        {% if let Some(name) = day.selected_meal_name %}{{ name }}{% else %}Choose a meal{% endif %}
-                    </button>
-                </label>
-                {% if day.has_entry %}
-                <button type="button" class="meal-picker-clear" aria-label="Clear this day">&times;</button>
-                {% endif %}
-            </div>
-
-            {% if !consumers.is_empty() %}
-            <div class="consumer-chips">
-                {% for consumer in consumers %}
-                {% if consumer.is_default || day.attends(consumer.id) %}
-                <label class="chip">
-                    <input type="checkbox" name="attendee_{{ consumer.id }}" {% if day.attends(consumer.id) %}checked{% endif %}>
-                    {{ consumer.name }}
-                </label>
-                {% endif %}
-                {% endfor %}
-            </div>
-            {% if day.has_hidden_consumers %}
-            <details class="add-known-consumer">
-                <summary>+ Add known consumer</summary>
-                {% for consumer in consumers %}
-                {% if !consumer.is_default && !day.attends(consumer.id) %}
-                <label class="chip">
-                    <input type="checkbox" name="attendee_{{ consumer.id }}">
-                    {{ consumer.name }}
-                </label>
-                {% endif %}
-                {% endfor %}
-            </details>
-            {% endif %}
-            {% endif %}
-
-            <div class="guest-list">
-                {% for name in day.guest_names %}
-                <span class="guest-chip">
-                    <input type="text" name="guest_name_{{ loop.index0 }}" value="{{ name }}" placeholder="Guest name">
-                    <button type="button" class="remove-guest-btn" aria-label="Remove guest">&times;</button>
-                </span>
-                {% endfor %}
-            </div>
-            <button type="button" class="secondary add-guest-btn">+ Add guest</button>
-
-            <label>Notes <input type="text" name="notes" value="{{ day.notes }}"></label>
-            <label>Meal time
-                <input type="time" name="meal_time" value='{{ day.effective_start_time.format("%H:%M") }}'>
-            </label>
-            <label>Duration (minutes)
-                <input type="number" name="duration_minutes" min="1" value="{{ day.effective_duration_minutes }}">
-            </label>
-        </form>
-        {% if day.has_entry %}
-        <form method="post" action="/plan/{{ day.date }}/delete" class="inline">
-            <input type="hidden" name="week_start" value="{{ week_start }}">
-            <button type="submit" class="secondary">Clear this day</button>
-        </form>
-        {% endif %}
-    </div>
+    {% call macros::plan_day_card(day, week_start, consumers) %}{% endcall %}
     {% endfor %}
 </div>
 

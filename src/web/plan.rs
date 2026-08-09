@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use askama::Template;
 use axum::extract::{Form, Path, Query, State};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 use serde::Deserialize;
+use sqlx::PgPool;
 
 use crate::clock;
 use crate::db::consumers::{self, Consumer};
@@ -81,9 +83,96 @@ impl IntoResponse for PlanTemplate {
     }
 }
 
+#[derive(Template)]
+#[template(path = "plan_day_fragment.html")]
+struct PlanDayFragmentTemplate {
+    day: PlanDay,
+    week_start: NaiveDate,
+    consumers: Vec<Consumer>,
+}
+
+impl IntoResponse for PlanDayFragmentTemplate {
+    fn into_response(self) -> Response {
+        super::render_askama_template(self)
+    }
+}
+
 #[derive(Deserialize)]
 struct PlanQuery {
     start: Option<NaiveDate>,
+}
+
+async fn active_consumers(pool: &PgPool) -> Vec<Consumer> {
+    consumers::list_all(pool)
+        .await
+        .expect("failed to list consumers")
+        .into_iter()
+        .filter(|c| c.active)
+        .collect()
+}
+
+async fn build_plan_day(
+    pool: &PgPool,
+    date: NaiveDate,
+    consumers: &[Consumer],
+    default_start_time: NaiveTime,
+    default_duration_minutes: i32,
+) -> PlanDay {
+    // A day with no entry yet hasn't been planned at all, so it starts from
+    // the household's default attendees rather than an empty set.
+    let default_attendee_ids: Vec<i64> = consumers
+        .iter()
+        .filter(|c| c.is_default)
+        .map(|c| c.id)
+        .collect();
+
+    let live_entry = meal_plan::get_by_date(pool, date)
+        .await
+        .expect("failed to fetch plan entry")
+        .filter(|entry| entry.deleted_at.is_none());
+
+    let attendee_ids = match &live_entry {
+        Some(entry) => meal_plan::get_attendance(pool, entry.id)
+            .await
+            .expect("failed to fetch attendance"),
+        None => default_attendee_ids,
+    };
+    let meals = meal_plan::suitability_for_attendees(pool, &attendee_ids)
+        .await
+        .expect("failed to compute suitability");
+    let selected_meal_id = live_entry.as_ref().map(|entry| entry.meal_id);
+    let selected_meal_name = selected_meal_id
+        .and_then(|id| meals.iter().find(|m| m.id == id))
+        .map(|m| m.name.clone());
+    let has_hidden_consumers = consumers
+        .iter()
+        .any(|c| !c.is_default && !attendee_ids.contains(&c.id));
+
+    PlanDay {
+        date,
+        date_label: date.format("%A, %-d %B").to_string(),
+        has_entry: live_entry.is_some(),
+        selected_meal_id,
+        selected_meal_name,
+        notes: live_entry
+            .as_ref()
+            .and_then(|entry| entry.notes.clone())
+            .unwrap_or_default(),
+        effective_start_time: live_entry
+            .as_ref()
+            .and_then(|entry| entry.start_time_override)
+            .unwrap_or(default_start_time),
+        effective_duration_minutes: live_entry
+            .as_ref()
+            .and_then(|entry| entry.duration_minutes_override)
+            .unwrap_or(default_duration_minutes),
+        guest_names: live_entry
+            .as_ref()
+            .map(|entry| entry.guest_names.clone())
+            .unwrap_or_default(),
+        attendee_ids,
+        has_hidden_consumers,
+    }
 }
 
 async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> PlanTemplate {
@@ -96,70 +185,21 @@ async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> 
     );
     let week_start = query.start.unwrap_or(upcoming_week_start);
 
-    let consumers: Vec<Consumer> = consumers::list_all(&state.pool)
-        .await
-        .expect("failed to list consumers")
-        .into_iter()
-        .filter(|c| c.active)
-        .collect();
-    let default_attendee_ids: Vec<i64> = consumers
-        .iter()
-        .filter(|c| c.is_default)
-        .map(|c| c.id)
-        .collect();
+    let consumers = active_consumers(&state.pool).await;
 
     let mut days = Vec::with_capacity(7);
     for offset in 0..7 {
         let date = week_start + Duration::days(offset);
-        let live_entry = meal_plan::get_by_date(&state.pool, date)
-            .await
-            .expect("failed to fetch plan entry")
-            .filter(|entry| entry.deleted_at.is_none());
-
-        // A day with no entry yet hasn't been planned at all, so it starts
-        // from the household's default attendees rather than an empty set.
-        let attendee_ids = match &live_entry {
-            Some(entry) => meal_plan::get_attendance(&state.pool, entry.id)
-                .await
-                .expect("failed to fetch attendance"),
-            None => default_attendee_ids.clone(),
-        };
-        let meals = meal_plan::suitability_for_attendees(&state.pool, &attendee_ids)
-            .await
-            .expect("failed to compute suitability");
-        let selected_meal_id = live_entry.as_ref().map(|entry| entry.meal_id);
-        let selected_meal_name = selected_meal_id
-            .and_then(|id| meals.iter().find(|m| m.id == id))
-            .map(|m| m.name.clone());
-        let has_hidden_consumers = consumers
-            .iter()
-            .any(|c| !c.is_default && !attendee_ids.contains(&c.id));
-
-        days.push(PlanDay {
-            date,
-            date_label: date.format("%A, %-d %B").to_string(),
-            has_entry: live_entry.is_some(),
-            selected_meal_id,
-            selected_meal_name,
-            notes: live_entry
-                .as_ref()
-                .and_then(|entry| entry.notes.clone())
-                .unwrap_or_default(),
-            effective_start_time: live_entry
-                .as_ref()
-                .and_then(|entry| entry.start_time_override)
-                .unwrap_or(app_settings.default_start_time),
-            effective_duration_minutes: live_entry
-                .as_ref()
-                .and_then(|entry| entry.duration_minutes_override)
-                .unwrap_or(app_settings.default_duration_minutes),
-            guest_names: live_entry
-                .as_ref()
-                .map(|entry| entry.guest_names.clone())
-                .unwrap_or_default(),
-            attendee_ids,
-            has_hidden_consumers,
-        });
+        days.push(
+            build_plan_day(
+                &state.pool,
+                date,
+                &consumers,
+                app_settings.default_start_time,
+                app_settings.default_duration_minutes,
+            )
+            .await,
+        );
     }
 
     PlanTemplate {
@@ -212,8 +252,9 @@ fn guest_names_from_form(dynamic_fields: &HashMap<String, String>) -> Vec<String
 async fn update(
     State(state): State<AppState>,
     Path(date): Path<NaiveDate>,
+    headers: HeaderMap,
     Form(form): Form<UpdatePlanForm>,
-) -> Redirect {
+) -> Response {
     let app_settings = settings::get(&state.pool)
         .await
         .expect("failed to load settings");
@@ -254,7 +295,25 @@ async fn update(
         .await
         .expect("failed to set attendance");
 
-    Redirect::to(&format!("/plan?start={}", form.week_start))
+    if super::is_ajax_request(&headers) {
+        let consumers = active_consumers(&state.pool).await;
+        let day = build_plan_day(
+            &state.pool,
+            date,
+            &consumers,
+            app_settings.default_start_time,
+            app_settings.default_duration_minutes,
+        )
+        .await;
+        return PlanDayFragmentTemplate {
+            day,
+            week_start: form.week_start,
+            consumers,
+        }
+        .into_response();
+    }
+
+    Redirect::to(&format!("/plan?start={}", form.week_start)).into_response()
 }
 
 #[derive(Deserialize)]
@@ -265,12 +324,35 @@ struct DeletePlanForm {
 async fn delete(
     State(state): State<AppState>,
     Path(date): Path<NaiveDate>,
+    headers: HeaderMap,
     Form(form): Form<DeletePlanForm>,
-) -> Redirect {
+) -> Response {
     meal_plan::soft_delete(&state.pool, date)
         .await
         .expect("failed to clear plan entry");
-    Redirect::to(&format!("/plan?start={}", form.week_start))
+
+    if super::is_ajax_request(&headers) {
+        let app_settings = settings::get(&state.pool)
+            .await
+            .expect("failed to load settings");
+        let consumers = active_consumers(&state.pool).await;
+        let day = build_plan_day(
+            &state.pool,
+            date,
+            &consumers,
+            app_settings.default_start_time,
+            app_settings.default_duration_minutes,
+        )
+        .await;
+        return PlanDayFragmentTemplate {
+            day,
+            week_start: form.week_start,
+            consumers,
+        }
+        .into_response();
+    }
+
+    Redirect::to(&format!("/plan?start={}", form.week_start)).into_response()
 }
 
 #[cfg(test)]
@@ -415,6 +497,119 @@ mod tests {
 
         let entry = meal_plan::get_by_date(&pool, date).await?.unwrap();
         assert!(entry.deleted_at.is_some());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn updating_a_day_via_ajax_returns_the_rerendered_fragment(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = consumers::insert(&pool, "Alice").await?;
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let body = format!(
+            "week_start=2026-08-08&meal_id={}&notes=Family+dinner&meal_time=19%3A00&\
+             duration_minutes=45&attendee_{}=on&guest_name_0=Aunt+Jane",
+            tacos.id, alice.id
+        );
+        let response = app
+            .oneshot(
+                Request::post(format!("/plan/{date}"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("Tacos"),
+            "fragment should show the newly selected meal's name: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn clearing_a_day_via_ajax_returns_the_rerendered_fragment(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        meal_plan::upsert_entry(&pool, date, tacos.id, None, None, None, &[]).await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post(format!("/plan/{date}/delete"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .body(Body::from("week_start=2026-08-08"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            !html.contains("Clear this day"),
+            "fragment for a cleared day should not show the clear button: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn ajax_fragment_does_not_include_page_chrome(pool: PgPool) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let body = format!(
+            "week_start=2026-08-08&meal_id={}&notes=&meal_time=18%3A30&duration_minutes=30",
+            tacos.id
+        );
+        let response = app
+            .oneshot(
+                Request::post(format!("/plan/{date}"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            !html.contains("<nav"),
+            "fragment should not include page nav: {html}"
+        );
+        assert!(
+            !html.contains("</html>"),
+            "fragment should not extend base.html: {html}"
+        );
+        assert!(
+            !html.contains("<!DOCTYPE"),
+            "fragment should not extend base.html: {html}"
+        );
 
         Ok(())
     }
