@@ -9,6 +9,9 @@
 current meal plans. Untick "Active" instead to retire it without losing that
 history.</p>
 {% endif %}
+{% if name_conflict %}
+<p class="badge badge-dislike">Can't save - another meal already has this name.</p>
+{% endif %}
 <form class="card" method="post" action="/meals/{{ meal.id }}">
     <label>Name <input type="text" name="name" value="{{ meal.name }}" required></label>
     <label class="checkbox-group">

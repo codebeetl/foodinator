@@ -155,6 +155,10 @@ struct MealEditTemplate {
     // is ON DELETE RESTRICT, so a meal that's ever been planned can't be
     // deleted outright.
     delete_blocked_by_plan_history: bool,
+    // Only set right after a rename collided with another meal's name -
+    // meals.name is UNIQUE, so this is the server-side backstop for anyone
+    // who renames to a name that already exists.
+    name_conflict: bool,
     ha_configured: bool,
     display_configured: bool,
     theme: String,
@@ -170,6 +174,8 @@ impl IntoResponse for MealEditTemplate {
 struct EditQuery {
     #[serde(default)]
     delete_blocked: bool,
+    #[serde(default)]
+    duplicate: bool,
 }
 
 async fn edit_form(
@@ -188,6 +194,7 @@ async fn edit_form(
         meal,
         preferences,
         delete_blocked_by_plan_history: query.delete_blocked,
+        name_conflict: query.duplicate,
         ha_configured: state.ha_client().await.is_some(),
         display_configured: state.display_token.is_some(),
         theme: state.theme().await,
@@ -250,9 +257,17 @@ async fn update(
     Path(id): Path<i64>,
     Form(form): Form<UpdateMealForm>,
 ) -> Redirect {
-    meals::update(&state.pool, id, &form.name, form.active.is_some())
-        .await
-        .expect("failed to update meal");
+    match meals::update(&state.pool, id, &form.name, form.active.is_some()).await {
+        Ok(_) => {}
+        Err(err)
+            if err
+                .as_database_error()
+                .is_some_and(|e| e.is_unique_violation()) =>
+        {
+            return Redirect::to(&format!("/meals/{id}?duplicate=true"));
+        }
+        Err(err) => panic!("failed to update meal: {err}"),
+    }
     apply_preference_fields(&state.pool, id, &form.preferences).await;
     Redirect::to("/meals")
 }
@@ -565,6 +580,55 @@ mod tests {
         assert!(
             html.contains("Can&#x27;t delete") || html.contains("Can't delete"),
             "the blocked-delete notice should render: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn renaming_a_meal_to_an_existing_name_is_blocked_and_shows_a_notice(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        meals::insert(&pool, "Tacos").await?;
+        let other = meals::insert(&pool, "Burritos").await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post(format!("/meals/{}", other.id))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("name=Tacos&active=true"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            &format!("/meals/{}?duplicate=true", other.id)
+        );
+        assert_eq!(
+            meals::get(&pool, other.id).await?.unwrap().name,
+            "Burritos",
+            "a blocked rename must not change the meal's name"
+        );
+
+        let edit_response = app
+            .oneshot(
+                Request::get(format!("/meals/{}?duplicate=true", other.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(edit_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("Can&#x27;t save") || html.contains("Can't save"),
+            "the name-conflict notice should render: {html}"
         );
 
         Ok(())

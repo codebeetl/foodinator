@@ -26,7 +26,7 @@ pub async fn insert(pool: &PgPool, name: &str) -> sqlx::Result<Meal> {
         Meal,
         "INSERT INTO meals (name) VALUES ($1) \
          RETURNING id, name, active, created_at, updated_at",
-        name
+        name.trim()
     )
     .fetch_one(pool)
     .await
@@ -48,7 +48,7 @@ pub async fn update(pool: &PgPool, id: i64, name: &str, active: bool) -> sqlx::R
         "UPDATE meals SET name = $2, active = $3, updated_at = now() WHERE id = $1 \
          RETURNING id, name, active, created_at, updated_at",
         id,
-        name,
+        name.trim(),
         active
     )
     .fetch_one(pool)
@@ -161,6 +161,22 @@ mod tests {
 
         let all = list_all(&pool).await?;
         assert_eq!(all, vec![created]);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn insert_and_update_trim_surrounding_whitespace_from_the_name(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        // A leading space sorts before every letter under `COLLATE "C"`, so an
+        // untrimmed name would jump to the top of every alphabetical listing
+        // and could silently duplicate an existing meal past the UNIQUE check.
+        let created = insert(&pool, "  Tacos  ").await?;
+        assert_eq!(created.name, "Tacos");
+
+        let updated = update(&pool, created.id, "  Fish Tacos  ", true).await?;
+        assert_eq!(updated.name, "Fish Tacos");
 
         Ok(())
     }
