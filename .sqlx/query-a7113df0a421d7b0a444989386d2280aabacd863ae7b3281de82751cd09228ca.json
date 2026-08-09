@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id, m.name, EXISTS (\n             SELECT 1 FROM consumer_meal_preferences p\n             WHERE p.meal_id = m.id\n               AND p.preference = 'like'\n               AND p.consumer_id = ANY($1::bigint[])\n           ) AS \"liked_by_attendee!\",\n           COALESCE(\n             (SELECT array_agg(c.name ORDER BY c.name COLLATE \"C\")\n              FROM consumer_meal_preferences p\n              JOIN consumers c ON c.id = p.consumer_id\n              WHERE p.meal_id = m.id\n                AND p.preference = 'dislike'\n                AND p.consumer_id = ANY($1::bigint[])),\n             ARRAY[]::text[]\n           ) AS \"disliked_by_attendee_names!\"\n         FROM meals m\n         LEFT JOIN (\n           SELECT meal_id, COUNT(*) AS occurrences\n           FROM meal_plan_entries\n           WHERE deleted_at IS NULL\n             AND entry_date >= CURRENT_DATE - INTERVAL '3 months'\n             AND entry_date <= CURRENT_DATE\n           GROUP BY meal_id\n         ) freq ON freq.meal_id = m.id\n         WHERE m.active\n         ORDER BY COALESCE(freq.occurrences, 0), m.name COLLATE \"C\"\n         LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "meals",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "meals",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "liked_by_attendee!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "disliked_by_attendee_names!",
+        "type_info": "TextArray",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "a7113df0a421d7b0a444989386d2280aabacd863ae7b3281de82751cd09228ca"
+}

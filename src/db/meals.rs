@@ -70,7 +70,9 @@ pub async fn delete(pool: &PgPool, id: i64) -> sqlx::Result<()> {
 }
 
 /// Trigram-ranked search for the plan-day meal picker: exact match first, then
-/// prefix match, then similarity - tolerant of typos, unlike plain ILIKE.
+/// prefix match, then similarity - tolerant of typos, unlike plain ILIKE. Ties
+/// within a tier break toward whichever meal has been planned less in the
+/// last 3 months, then alphabetically.
 /// `attendee_ids` feeds the same like/dislike annotations as suitability_for_attendees.
 pub async fn search(
     pool: &PgPool,
@@ -96,6 +98,14 @@ pub async fn search(
              ARRAY[]::text[]
            ) AS "disliked_by_attendee_names!"
          FROM meals m
+         LEFT JOIN (
+           SELECT meal_id, COUNT(*) AS occurrences
+           FROM meal_plan_entries
+           WHERE deleted_at IS NULL
+             AND entry_date >= CURRENT_DATE - INTERVAL '3 months'
+             AND entry_date <= CURRENT_DATE
+           GROUP BY meal_id
+         ) freq ON freq.meal_id = m.id
          WHERE m.active AND (m.name ILIKE '%' || $1 || '%' OR similarity(m.name, $1) > 0.2)
          ORDER BY
            CASE
@@ -104,6 +114,7 @@ pub async fn search(
              ELSE 2
            END,
            similarity(m.name, $1) DESC,
+           COALESCE(freq.occurrences, 0),
            m.name COLLATE "C"
          LIMIT $3"#,
         q,
@@ -114,8 +125,10 @@ pub async fn search(
     .await
 }
 
-/// The picker's default list before anything has been typed: no ranking signal
-/// to go on, so alphabetical is the only defensible order.
+/// The picker's default list before anything has been typed, ordered by how
+/// rarely each meal has been planned in the last 3 months, so the default
+/// list nudges toward variety instead of always showing the same
+/// alphabetically-first meals.
 pub async fn list_top(
     pool: &PgPool,
     attendee_ids: &[i64],
@@ -139,8 +152,16 @@ pub async fn list_top(
              ARRAY[]::text[]
            ) AS "disliked_by_attendee_names!"
          FROM meals m
+         LEFT JOIN (
+           SELECT meal_id, COUNT(*) AS occurrences
+           FROM meal_plan_entries
+           WHERE deleted_at IS NULL
+             AND entry_date >= CURRENT_DATE - INTERVAL '3 months'
+             AND entry_date <= CURRENT_DATE
+           GROUP BY meal_id
+         ) freq ON freq.meal_id = m.id
          WHERE m.active
-         ORDER BY m.name COLLATE "C"
+         ORDER BY COALESCE(freq.occurrences, 0), m.name COLLATE "C"
          LIMIT $2"#,
         attendee_ids,
         limit
@@ -279,6 +300,34 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
+    async fn search_breaks_a_relevance_tie_by_least_planned_in_the_last_three_months(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        // "<word> Soup" all score similarity 0.5 against the query "Soup"
+        // (verified directly against pg_trgm) and none is an exact or prefix
+        // match, so all three land in the same relevance tier with an
+        // identical score - a genuine tie for the occurrence tiebreak to
+        // break.
+        insert(&pool, "Bean Soup").await?;
+        insert(&pool, "Leek Soup").await?;
+        let corn = insert(&pool, "Corn Soup").await?;
+
+        let today = chrono::Utc::now().date_naive();
+        crate::db::meal_plan::upsert_entry(&pool, today, corn.id, None, None, None, &[]).await?;
+
+        let results = search(&pool, "Soup", &[], 10).await?;
+
+        assert_eq!(
+            results.iter().map(|m| &m.name).collect::<Vec<_>>(),
+            vec!["Bean Soup", "Leek Soup", "Corn Soup"],
+            "tied on relevance, so the never-planned meals sort alphabetically ahead of \
+             Corn Soup, which was planned this window"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
     async fn search_excludes_inactive_meals_and_flags_disliked_ones(
         pool: PgPool,
     ) -> sqlx::Result<()> {
@@ -339,6 +388,85 @@ mod tests {
             results.iter().map(|m| &m.name).collect::<Vec<_>>(),
             vec!["Curry", "Pasta"],
             "alphabetical order, capped at the limit"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_top_orders_by_least_planned_in_the_last_three_months(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let frequent = insert(&pool, "Tacos").await?;
+        let rare = insert(&pool, "Curry").await?;
+        insert(&pool, "Pasta").await?;
+        let stale = insert(&pool, "Soup").await?;
+
+        let today = chrono::Utc::now().date_naive();
+        crate::db::meal_plan::upsert_entry(&pool, today, frequent.id, None, None, None, &[])
+            .await?;
+        crate::db::meal_plan::upsert_entry(
+            &pool,
+            today - chrono::Duration::days(7),
+            frequent.id,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await?;
+        crate::db::meal_plan::upsert_entry(
+            &pool,
+            today - chrono::Duration::days(14),
+            rare.id,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await?;
+        // Planned once, but well outside the 3-month window - should count as
+        // never-planned within the window, not as "rare".
+        crate::db::meal_plan::upsert_entry(
+            &pool,
+            today - chrono::Duration::days(120),
+            stale.id,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await?;
+
+        let results = list_top(&pool, &[], 10).await?;
+
+        assert_eq!(
+            results.iter().map(|m| &m.name).collect::<Vec<_>>(),
+            vec!["Pasta", "Soup", "Curry", "Tacos"],
+            "never-planned (Pasta) and stale-planned (Soup) tie at zero and fall back to \
+             alphabetical order, ahead of Curry (planned once) and Tacos (planned twice)"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_top_does_not_count_a_cleared_day_toward_a_meals_occurrences(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let cleared = insert(&pool, "Curry").await?;
+        insert(&pool, "Tacos").await?;
+        let today = chrono::Utc::now().date_naive();
+        crate::db::meal_plan::upsert_entry(&pool, today, cleared.id, None, None, None, &[]).await?;
+        crate::db::meal_plan::soft_delete(&pool, today).await?;
+
+        let results = list_top(&pool, &[], 10).await?;
+
+        assert_eq!(
+            results.iter().map(|m| &m.name).collect::<Vec<_>>(),
+            vec!["Curry", "Tacos"],
+            "a soft-deleted (cleared) plan entry shouldn't count toward the meal's \
+             occurrences, so Curry ties Tacos at zero and alphabetical order applies"
         );
 
         Ok(())
