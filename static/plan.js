@@ -142,11 +142,16 @@
     activePicker = picker;
     const mealIdInput = picker.querySelector('input[name="meal_id"]');
     const currentName = picker.querySelector(".meal-picker-trigger").textContent.trim();
-    searchInput.value = mealIdInput.value ? currentName : "";
+    // Leave the field blank (rather than pre-filled with the current meal) so
+    // the full list is shown and typing searches fresh; the current
+    // selection is shown as placeholder shadow-text instead, so it's still
+    // visible but doesn't have to be cleared to pick something else, and
+    // closing without typing leaves the day unchanged.
+    searchInput.value = "";
+    searchInput.placeholder = mealIdInput.value ? `Currently: ${currentName}` : "Search meals...";
     dialog.showModal();
     searchInput.focus();
-    searchInput.select();
-    fetchResults(searchInput.value, attendeeIdsFor(picker));
+    fetchResults("", attendeeIdsFor(picker));
   }
 
   document.addEventListener("click", (event) => {
