@@ -1,4 +1,6 @@
-use chrono::{DateTime, Utc};
+use std::collections::HashMap;
+
+use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgPool;
 
 use crate::db::meal_plan::MealSuitability;
@@ -168,6 +170,25 @@ pub async fn list_top(
     )
     .fetch_all(pool)
     .await
+}
+
+/// Most recent non-cleared plan-entry date per meal, past or future - used to
+/// show a "last planned" column on the meals list. Meals with no entry at
+/// all (or only cleared ones) are simply absent from the map.
+pub async fn last_planned_dates(pool: &PgPool) -> sqlx::Result<HashMap<i64, NaiveDate>> {
+    let rows = sqlx::query!(
+        r#"SELECT meal_id, MAX(entry_date) AS "last_planned!: NaiveDate"
+           FROM meal_plan_entries
+           WHERE deleted_at IS NULL
+           GROUP BY meal_id"#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.meal_id, row.last_planned))
+        .collect())
 }
 
 #[cfg(test)]
@@ -369,6 +390,51 @@ mod tests {
             results[0].disliked_by_attendee_names,
             vec!["Bob", "Charlie"],
             "every disliking attendee should be named, not just flagged"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn last_planned_dates_reports_the_most_recent_non_cleared_date_including_future(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = insert(&pool, "Tacos").await?;
+        let curry = insert(&pool, "Curry").await?;
+        insert(&pool, "Pasta").await?;
+        let today = chrono::Utc::now().date_naive();
+
+        crate::db::meal_plan::upsert_entry(
+            &pool,
+            today - chrono::Duration::days(10),
+            tacos.id,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await?;
+        let future = today + chrono::Duration::days(5);
+        crate::db::meal_plan::upsert_entry(&pool, future, tacos.id, None, None, None, &[]).await?;
+        crate::db::meal_plan::upsert_entry(&pool, today, curry.id, None, None, None, &[]).await?;
+        crate::db::meal_plan::soft_delete(&pool, today).await?;
+
+        let dates = last_planned_dates(&pool).await?;
+
+        assert_eq!(
+            dates.get(&tacos.id),
+            Some(&future),
+            "the most recent occurrence should win, even if it's in the future"
+        );
+        assert_eq!(
+            dates.get(&curry.id),
+            None,
+            "a soft-deleted (cleared) plan entry shouldn't count as a last-planned date"
+        );
+        assert_eq!(
+            dates.get(&(tacos.id + curry.id + 1000)),
+            None,
+            "a never-planned meal should be absent from the map"
         );
 
         Ok(())

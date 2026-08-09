@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT meal_id, MAX(entry_date) AS \"last_planned!: NaiveDate\"\n           FROM meal_plan_entries\n           WHERE deleted_at IS NULL\n           GROUP BY meal_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "meal_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "meal_plan_entries",
+            "name": "meal_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "last_planned!: NaiveDate",
+        "type_info": "Date",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "5eb54bd93f201a767a593052b16d60e03e5ebb55b1ca3208d2fb5769c87d6e35"
+}

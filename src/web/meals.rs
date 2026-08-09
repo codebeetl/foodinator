@@ -44,6 +44,9 @@ struct MealRow {
     // Askama's expression syntax doesn't support the `*deref` this comparison
     // would otherwise need.
     is_open: bool,
+    // Pre-formatted (ISO date, or "Never") rather than a raw NaiveDate, again
+    // to keep formatting logic out of the template.
+    last_planned: String,
 }
 
 #[derive(Template)]
@@ -82,6 +85,9 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
     let pref_rows = preferences::list_for_all_meals(&state.pool)
         .await
         .expect("failed to list preferences");
+    let mut last_planned = meals::last_planned_dates(&state.pool)
+        .await
+        .expect("failed to list last-planned dates");
 
     let mut prefs_by_meal: HashMap<i64, Vec<ConsumerPreference>> = HashMap::new();
     for row in pref_rows {
@@ -108,12 +114,17 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
                 .filter(|p| p.preference.as_deref() == Some("dislike"))
                 .count() as i64;
             let is_open = query.open == Some(meal.id);
+            let last_planned = last_planned
+                .remove(&meal.id)
+                .map(|date| date.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "Never".to_string());
             MealRow {
                 meal,
                 preferences,
                 likes,
                 dislikes,
                 is_open,
+                last_planned,
             }
         })
         .collect();

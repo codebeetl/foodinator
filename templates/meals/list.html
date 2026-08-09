@@ -8,7 +8,7 @@
 <div class="table-scroll card">
     <table id="meals-table">
         <thead>
-            <tr><th>Name</th><th>Status</th><th>Preferences</th></tr>
+            <tr><th>Name</th><th>Status</th><th>Preferences</th><th>Last planned</th></tr>
         </thead>
         <tbody>
             {% for row in rows %}
@@ -43,6 +43,7 @@
                     </details>
                     {% endif %}
                 </td>
+                <td>{{ row.last_planned }}</td>
             </tr>
             {% endfor %}
         </tbody>
