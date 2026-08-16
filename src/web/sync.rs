@@ -13,9 +13,12 @@ use crate::gcal::{self, client::GcalClient, sync as gcal_sync};
 use crate::ha::sync as ha_sync;
 use crate::state::{AppState, PageContext};
 
-struct HostHeader(String);
+struct RequestOrigin {
+    scheme: String,
+    host: String,
+}
 
-impl<S: Send + Sync> axum::extract::FromRequestParts<S> for HostHeader {
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for RequestOrigin {
     type Rejection = Redirect;
 
     #[allow(refining_impl_trait)]
@@ -29,9 +32,21 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for HostHeader {
             .get(axum::http::header::HOST)
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
+        let scheme = parts
+            .uri
+            .scheme_str()
+            .map(str::to_string)
+            .or_else(|| {
+                parts
+                    .headers
+                    .get("x-forwarded-proto")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "http".to_string());
         Box::pin(async move {
             match host {
-                Some(h) => Ok(HostHeader(h)),
+                Some(h) => Ok(RequestOrigin { scheme, host: h }),
                 None => Err(Redirect::temporary("/sync?gcal_error=no_host")),
             }
         })
@@ -300,11 +315,11 @@ async fn save_gcal_config(
     template
 }
 
-fn build_redirect_uri(host: &str) -> String {
-    format!("https://{host}/sync/gcal/callback")
+fn build_redirect_uri(scheme: &str, host: &str) -> String {
+    format!("{scheme}://{host}/sync/gcal/callback")
 }
 
-async fn gcal_auth(State(state): State<AppState>, HostHeader(host): HostHeader) -> Redirect {
+async fn gcal_auth(State(state): State<AppState>, origin: RequestOrigin) -> Redirect {
     let settings = settings::get(&state.pool)
         .await
         .expect("failed to fetch settings");
@@ -316,8 +331,26 @@ async fn gcal_auth(State(state): State<AppState>, HostHeader(host): HostHeader) 
         return Redirect::temporary("/sync?gcal_error=not_configured");
     }
 
-    let redirect_uri = build_redirect_uri(&host);
-    let auth_url = gcal::build_auth_url(client_id, &redirect_uri);
+    let redirect_uri = build_redirect_uri(&origin.scheme, &origin.host);
+
+    // Google requires device_id and device_name when the redirect URI points
+    // to a private/internal IP address.
+    let host_is_private_ip = origin
+        .host
+        .split(':')
+        .next()
+        .and_then(|h| h.parse::<std::net::IpAddr>().ok())
+        .is_some_and(|ip| match ip {
+            std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback(),
+        });
+    let (device_id, device_name) = if host_is_private_ip {
+        (Some(origin.host.as_str()), Some("foodinator"))
+    } else {
+        (None, None)
+    };
+
+    let auth_url = gcal::build_auth_url(client_id, &redirect_uri, device_id, device_name);
 
     Redirect::temporary(&auth_url)
 }
@@ -330,7 +363,7 @@ pub struct GcalCallbackParams {
 
 async fn gcal_callback(
     State(state): State<AppState>,
-    HostHeader(host): HostHeader,
+    origin: RequestOrigin,
     Query(params): Query<GcalCallbackParams>,
 ) -> Redirect {
     if let Some(error) = &params.error {
@@ -353,7 +386,7 @@ async fn gcal_callback(
         return Redirect::temporary("/sync?gcal_error=not_configured");
     };
 
-    let redirect_uri = build_redirect_uri(&host);
+    let redirect_uri = build_redirect_uri(&origin.scheme, &origin.host);
 
     match gcal::exchange_code(
         &gcal_config.client_id,

@@ -54,9 +54,15 @@ pub struct GcalTokens {
 }
 
 /// Builds the Google OAuth2 authorization URL. The user should be redirected
-/// to this URL to consent.
-pub fn build_auth_url(client_id: &str, redirect_uri: &str) -> String {
-    format!(
+/// to this URL to consent. When `device_id` and `device_name` are provided
+/// they are appended (required by Google for private/internal redirect hosts).
+pub fn build_auth_url(
+    client_id: &str,
+    redirect_uri: &str,
+    device_id: Option<&str>,
+    device_name: Option<&str>,
+) -> String {
+    let mut url = format!(
         "{GOOGLE_AUTH_URL}?\
          client_id={client_id}&\
          redirect_uri={redirect_uri}&\
@@ -64,7 +70,14 @@ pub fn build_auth_url(client_id: &str, redirect_uri: &str) -> String {
          scope={SCOPE}&\
          access_type=offline&\
          prompt=consent"
-    )
+    );
+    if let Some(id) = device_id {
+        url.push_str(&format!("&device_id={id}"));
+    }
+    if let Some(name) = device_name {
+        url.push_str(&format!("&device_name={name}"));
+    }
+    url
 }
 
 /// Exchange an authorization code for access + refresh tokens.
@@ -185,11 +198,23 @@ mod tests {
 
     #[test]
     fn build_auth_url_contains_required_parameters() {
-        let url = build_auth_url("my-client-id", "https://example.com/callback");
+        let url = build_auth_url("my-client-id", "https://example.com/callback", None, None);
         assert!(url.contains("client_id=my-client-id"));
         assert!(url.contains("redirect_uri=https://example.com/callback"));
         assert!(url.contains("response_type=code"));
         assert!(url.contains("access_type=offline"));
         assert!(url.contains("prompt=consent"));
+    }
+
+    #[test]
+    fn build_auth_url_includes_device_params_for_private_ip() {
+        let url = build_auth_url(
+            "my-client-id",
+            "http://192.168.1.100:8000/callback",
+            Some("192.168.1.100:8000"),
+            Some("foodinator"),
+        );
+        assert!(url.contains("device_id=192.168.1.100:8000"));
+        assert!(url.contains("device_name=foodinator"));
     }
 }
