@@ -24,6 +24,8 @@ pub struct AppState {
     // Env-var fallbacks for GCal config, overridden per-field by app_settings.
     pub gcal_env_client_id: Option<String>,
     pub gcal_env_client_secret: Option<String>,
+    // Override for the OAuth redirect URI (e.g. tunnel URL).
+    pub gcal_redirect_uri: Option<String>,
     pub admin_username: String,
     pub admin_password: String,
     pub household_tz: Tz,
@@ -104,6 +106,7 @@ pub fn test_app_state(pool: PgPool) -> AppState {
         ha_env_calendar_entity_id: Some("calendar.test".to_string()),
         gcal_env_client_id: Some("test-gcal-client-id".to_string()),
         gcal_env_client_secret: Some("test-gcal-secret".to_string()),
+        gcal_redirect_uri: None,
         admin_username: "admin".to_string(),
         admin_password: "hunter2".to_string(),
         household_tz: chrono_tz::UTC,

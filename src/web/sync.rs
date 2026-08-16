@@ -319,25 +319,15 @@ fn build_redirect_uri(scheme: &str, host: &str) -> String {
     format!("{scheme}://{host}/sync/gcal/callback")
 }
 
-/// Google only allows "localhost" as an OAuth redirect host. Rewrite private
-/// IPs to localhost while preserving the port so the URI matches what's
-/// registered in the Cloud Console (e.g. `http://localhost:666/sync/gcal/callback`).
-fn rewrite_private_host(host: &str) -> String {
-    let is_private = host
-        .split(':')
-        .next()
-        .and_then(|h| h.parse::<std::net::IpAddr>().ok())
-        .is_some_and(|ip| match ip {
-            std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
-            std::net::IpAddr::V6(v6) => v6.is_loopback(),
-        });
-    if !is_private {
-        return host.to_string();
+/// Build the OAuth redirect URI from the incoming request, or from the
+/// `GCAL_REDIRECT_URI` env-var override when set. The override is needed
+/// because Google only allows `localhost` as a redirect host, which doesn't
+/// work when the browser is on a different machine than the server.
+fn resolve_redirect_uri(state: &AppState, origin: &RequestOrigin) -> String {
+    if let Some(ref uri) = state.gcal_redirect_uri {
+        return uri.clone();
     }
-    match host.find(':') {
-        Some(pos) => format!("localhost{}", &host[pos..]),
-        None => "localhost".to_string(),
-    }
+    build_redirect_uri(&origin.scheme, &origin.host)
 }
 
 async fn gcal_auth(State(state): State<AppState>, origin: RequestOrigin) -> Redirect {
@@ -352,11 +342,12 @@ async fn gcal_auth(State(state): State<AppState>, origin: RequestOrigin) -> Redi
         return Redirect::temporary("/sync?gcal_error=not_configured");
     }
 
-    // Google only allows "localhost" as a redirect host — rewrite private IPs
-    // to localhost so the redirect URI matches what's registered in the console.
-    let redirect_host = rewrite_private_host(&origin.host);
+    // Use the env-var override when set, otherwise derive from the request.
+    // Google only allows "localhost" for private-network redirect URIs, so
+    // when accessing from another machine, set GCAL_REDIRECT_URI to a tunnel
+    // URL (e.g. ngrok, cloudflare tunnel) or use an SSH port forward.
+    let redirect_uri = resolve_redirect_uri(&state, &origin);
 
-    let redirect_uri = build_redirect_uri(&origin.scheme, &redirect_host);
     let auth_url = gcal::build_auth_url(client_id, &redirect_uri, None, None);
 
     Redirect::temporary(&auth_url)
@@ -393,7 +384,7 @@ async fn gcal_callback(
         return Redirect::temporary("/sync?gcal_error=not_configured");
     };
 
-    let redirect_uri = build_redirect_uri(&origin.scheme, &rewrite_private_host(&origin.host));
+    let redirect_uri = resolve_redirect_uri(&state, &origin);
 
     match gcal::exchange_code(
         &gcal_config.client_id,

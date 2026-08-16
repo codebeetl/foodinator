@@ -14,6 +14,9 @@ pub struct Config {
     // UI picker after OAuth consent.
     pub gcal_client_id: Option<String>,
     pub gcal_client_secret: Option<String>,
+    // Optional: override the OAuth redirect URI (e.g. when using a tunnel
+    // like ngrok or cloudflare tunnel for remote OAuth consent).
+    pub gcal_redirect_uri: Option<String>,
     pub admin_username: String,
     pub admin_password: String,
     pub app_tz: String,
@@ -36,6 +39,7 @@ impl Config {
             ha_calendar_entity_id: env::var("HA_CALENDAR_ENTITY_ID").ok(),
             gcal_client_id: env::var("GCAL_CLIENT_ID").ok(),
             gcal_client_secret: env::var("GCAL_CLIENT_SECRET").ok(),
+            gcal_redirect_uri: env::var("GCAL_REDIRECT_URI").ok(),
             admin_username: required("ADMIN_USERNAME")?,
             admin_password: required("ADMIN_PASSWORD")?,
             app_tz: required("APP_TZ")?,
@@ -193,10 +197,18 @@ mod tests {
         let _guards = set_all_required();
         let _gcal_id = EnvVarGuard::set("GCAL_CLIENT_ID", "my-client-id");
         let _gcal_secret = EnvVarGuard::set("GCAL_CLIENT_SECRET", "my-secret");
+        let _gcal_redirect = EnvVarGuard::set(
+            "GCAL_REDIRECT_URI",
+            "https://example.ngrok.io/sync/gcal/callback",
+        );
 
         let config = Config::from_env().expect("all vars present");
 
         assert_eq!(config.gcal_client_id.as_deref(), Some("my-client-id"));
         assert_eq!(config.gcal_client_secret.as_deref(), Some("my-secret"));
+        assert_eq!(
+            config.gcal_redirect_uri.as_deref(),
+            Some("https://example.ngrok.io/sync/gcal/callback")
+        );
     }
 }
