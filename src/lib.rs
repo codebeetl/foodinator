@@ -47,6 +47,8 @@ pub async fn run() {
         ha_env_url: config.ha_url.clone(),
         ha_env_token: config.ha_token.clone(),
         ha_env_calendar_entity_id: config.ha_calendar_entity_id.clone(),
+        gcal_env_client_id: config.gcal_client_id.clone(),
+        gcal_env_client_secret: config.gcal_client_secret.clone(),
         admin_username: config.admin_username.clone(),
         admin_password: config.admin_password.clone(),
         household_tz,

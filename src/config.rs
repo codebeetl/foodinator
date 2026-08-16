@@ -9,6 +9,11 @@ pub struct Config {
     pub ha_url: Option<String>,
     pub ha_token: Option<String>,
     pub ha_calendar_entity_id: Option<String>,
+    // Optional: Google Calendar OAuth2 credentials (env-var default,
+    // overridable per-field from Settings). Calendar ID is set via the
+    // UI picker after OAuth consent.
+    pub gcal_client_id: Option<String>,
+    pub gcal_client_secret: Option<String>,
     pub admin_username: String,
     pub admin_password: String,
     pub app_tz: String,
@@ -29,6 +34,8 @@ impl Config {
             ha_url: env::var("HA_URL").ok(),
             ha_token: env::var("HA_TOKEN").ok(),
             ha_calendar_entity_id: env::var("HA_CALENDAR_ENTITY_ID").ok(),
+            gcal_client_id: env::var("GCAL_CLIENT_ID").ok(),
+            gcal_client_secret: env::var("GCAL_CLIENT_SECRET").ok(),
             admin_username: required("ADMIN_USERNAME")?,
             admin_password: required("ADMIN_PASSWORD")?,
             app_tz: required("APP_TZ")?,
@@ -165,5 +172,31 @@ mod tests {
         let err = Config::from_env().expect_err("APP_TZ is missing");
 
         assert_eq!(err.0, "APP_TZ");
+    }
+
+    #[test]
+    fn from_env_leaves_gcal_fields_unset_when_env_vars_are_absent() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _guards = set_all_required();
+        let _gcal_id = EnvVarGuard::unset("GCAL_CLIENT_ID");
+        let _gcal_secret = EnvVarGuard::unset("GCAL_CLIENT_SECRET");
+
+        let config = Config::from_env().expect("GCal vars are optional");
+
+        assert_eq!(config.gcal_client_id, None);
+        assert_eq!(config.gcal_client_secret, None);
+    }
+
+    #[test]
+    fn from_env_reads_gcal_fields_when_present() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _guards = set_all_required();
+        let _gcal_id = EnvVarGuard::set("GCAL_CLIENT_ID", "my-client-id");
+        let _gcal_secret = EnvVarGuard::set("GCAL_CLIENT_SECRET", "my-secret");
+
+        let config = Config::from_env().expect("all vars present");
+
+        assert_eq!(config.gcal_client_id.as_deref(), Some("my-client-id"));
+        assert_eq!(config.gcal_client_secret.as_deref(), Some("my-secret"));
     }
 }

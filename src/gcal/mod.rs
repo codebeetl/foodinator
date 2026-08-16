@@ -1,6 +1,7 @@
 pub mod client;
 pub mod sync;
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -13,7 +14,8 @@ const SCOPE: &str = "https://www.googleapis.com/auth/calendar.events";
 pub enum GcalError {
     TokenExchange(String),
     TokenRefresh(String),
-    Api(String),
+    Http(String),
+    Api { status: u16, message: String },
 }
 
 impl fmt::Display for GcalError {
@@ -21,12 +23,24 @@ impl fmt::Display for GcalError {
         match self {
             GcalError::TokenExchange(msg) => write!(f, "token exchange failed: {msg}"),
             GcalError::TokenRefresh(msg) => write!(f, "token refresh failed: {msg}"),
-            GcalError::Api(msg) => write!(f, "Google Calendar API error: {msg}"),
+            GcalError::Http(msg) => write!(f, "HTTP error: {msg}"),
+            GcalError::Api { status, message } => {
+                write!(f, "Google Calendar API error ({status}): {message}")
+            }
         }
     }
 }
 
 impl std::error::Error for GcalError {}
+
+/// A calendar entry returned from the Google Calendar API calendarList endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GcalCalendarEntry {
+    pub id: String,
+    pub summary: String,
+    #[serde(default)]
+    pub is_primary: bool,
+}
 
 /// Tokens returned from the OAuth2 flow.
 #[derive(Debug, Clone)]

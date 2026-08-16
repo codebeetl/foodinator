@@ -5,104 +5,138 @@
 {% block content %}
 <h2>Sync</h2>
 
-<h3>Home Assistant</h3>
-<div class="card">
-    <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
-    14 days to your Home Assistant calendar. Once an entry is synced it
-    can't be corrected here - only avoided by clearing it before it syncs.</p>
+<details class="sync-section">
+    <summary class="sync-header">
+        <h3>Home Assistant</h3>
+        <form method="post" action="/sync" onclick="event.stopPropagation()">
+            {% if ctx.ha_configured %}
+            <button type="submit">Sync to Home Assistant</button>
+            {% else %}
+            <button type="submit" disabled>Sync to Home Assistant</button>
+            {% endif %}
+        </form>
+    </summary>
+    <div class="card">
+        <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
+        14 days to your Home Assistant calendar. Once an entry is synced it
+        can't be corrected here - only avoided by clearing it before it syncs.</p>
 
-    <form method="post" action="/sync/ha-save">
-        <label>HA URL
-            <input type="text" name="ha_url" value="{{ ha_url_input }}" placeholder="http://homeassistant.local:8123">
-        </label>
-        <label>HA long-lived access token
-            <input type="password" name="ha_token" placeholder="{% if ctx.ha_configured %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
-        </label>
-        <label>HA calendar entity ID
-            <input type="text" name="ha_calendar_entity_id" value="{{ ha_calendar_entity_id_input }}" placeholder="calendar.foodinator">
-        </label>
+        <form method="post" action="/sync/ha-save">
+            <label>HA URL
+                <input type="text" name="ha_url" value="{{ ha_url_input }}" placeholder="http://homeassistant.local:8123">
+            </label>
+            <label>HA long-lived access token
+                <input type="password" name="ha_token" placeholder="{% if ctx.ha_configured %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
+            </label>
+            <label>HA calendar entity ID
+                <input type="text" name="ha_calendar_entity_id" value="{{ ha_calendar_entity_id_input }}" placeholder="calendar.foodinator">
+            </label>
 
-        {% match ha_test_result %}
-        {% when Some with (HaTestOutcome::Success) %}
-        <p class="badge badge-active">Connection successful</p>
-        {% when Some with (HaTestOutcome::Failure(message)) %}
-        <p class="badge badge-dislike">Connection failed: {{ message }}</p>
-        {% when Some with (HaTestOutcome::NotConfigured) %}
-        <p class="badge badge-inactive">Not configured - fill in all three fields (or their env-var equivalents) to test</p>
-        {% when None %}
-        {% endmatch %}
+            {% match ha_test_result %}
+            {% when Some with (HaTestOutcome::Success) %}
+            <p class="badge badge-active">Connection successful</p>
+            {% when Some with (HaTestOutcome::Failure(message)) %}
+            <p class="badge badge-dislike">Connection failed: {{ message }}</p>
+            {% when Some with (HaTestOutcome::NotConfigured) %}
+            <p class="badge badge-inactive">Not configured - fill in all three fields (or their env-var equivalents) to test</p>
+            {% when None %}
+            {% endmatch %}
 
-        <div class="settings-actions">
-            <button type="submit">Save</button>
-            <button type="submit" class="secondary" formaction="/sync/ha-test" formmethod="post" formnovalidate>Test connection</button>
-        </div>
-    </form>
-</div>
-
-<div class="card">
-    <form method="post" action="/sync">
-        {% if ctx.ha_configured %}
-        <button type="submit">Sync to Home Assistant</button>
-        {% else %}
-        <button type="submit" disabled>Sync to Home Assistant</button>
-        <p><small>Fill in and save all HA fields above to enable syncing.</small></p>
-        {% endif %}
-    </form>
-</div>
-
-<h3>Google Calendar</h3>
-<div class="card">
-    <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
-    14 days to your Google Calendar via OAuth2.</p>
-
-    <form method="post" action="/sync/gcal/save">
-        <label>Client ID
-            <input type="text" name="gcal_client_id" value="{{ gcal_client_id_input }}" placeholder="123456789.apps.googleusercontent.com">
-        </label>
-        <label>Client Secret
-            <input type="password" name="gcal_client_secret" placeholder="{% if gcal_connected %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
-        </label>
-        <label>Calendar ID
-            <input type="text" name="gcal_calendar_id" value="{{ gcal_calendar_id_input }}" placeholder="family@group.calendar.google.com">
-        </label>
-
-        <div class="settings-actions">
-            <button type="submit">Save</button>
-        </div>
-    </form>
-</div>
-
-{% if gcal_just_connected %}
-<div class="card">
-    <p class="badge badge-active">Successfully connected to Google Calendar</p>
-</div>
-{% endif %}
-
-{% match gcal_error %}
-{% when Some with (error) %}
-<div class="card">
-    <p class="badge badge-dislike">Error: {{ error }}</p>
-</div>
-{% when None %}
-{% endmatch %}
-
-{% if gcal_connected %}
-<div class="card">
-    <p class="badge badge-active">Connected to Google Calendar</p>
-    <form method="post" action="/sync/gcal">
-        <button type="submit">Sync to Google Calendar</button>
-    </form>
-</div>
-{% else %}
-<div class="card">
-    {% if gcal_fields_filled %}
-    <a href="/sync/gcal/auth" class="button">Connect to Google</a>
-    {% else %}
-    <a class="button disabled" aria-disabled="true">Connect to Google</a>
-    <p><small>Fill in and save all Google Calendar fields above to enable connecting.</small></p>
+            <div class="settings-actions">
+                <button type="submit">Save</button>
+                <button type="submit" class="secondary" formaction="/sync/ha-test" formmethod="post" formnovalidate>Test connection</button>
+            </div>
+        </form>
+    </div>
+    {% if !ctx.ha_configured %}
+    <p class="sync-hint"><small>Fill in and save all fields above to enable syncing.</small></p>
     {% endif %}
-</div>
-{% endif %}
+</details>
+
+<details class="sync-section">
+    <summary class="sync-header">
+        <h3>Google Calendar</h3>
+        {% if gcal_connected %}
+        <form method="post" action="/sync/gcal" onclick="event.stopPropagation()">
+            <button type="submit">Sync to Google Calendar</button>
+        </form>
+        {% else %}
+        {% if gcal_fields_filled %}
+        <a href="/sync/gcal/auth" class="button">Connect to Google</a>
+        {% else %}
+        <a class="button disabled" aria-disabled="true">Connect to Google</a>
+        {% endif %}
+        {% endif %}
+    </summary>
+    <div class="card">
+        <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
+        14 days to your Google Calendar via OAuth2.</p>
+
+        <form method="post" action="/sync/gcal/save">
+            <label>Client ID
+                <input type="text" name="gcal_client_id" value="{{ gcal_client_id_input }}" placeholder="123456789.apps.googleusercontent.com">
+            </label>
+            <label>Client Secret
+                <input type="password" name="gcal_client_secret" placeholder="{% if gcal_connected %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
+            </label>
+
+            <div class="settings-actions">
+                <button type="submit">Save</button>
+            </div>
+        </form>
+    </div>
+
+    {% if gcal_just_connected %}
+    <div class="card">
+        <p class="badge badge-active">Successfully connected to Google Calendar</p>
+    </div>
+    {% endif %}
+
+    {% match gcal_error %}
+    {% when Some with (error) %}
+    <div class="card">
+        <p class="badge badge-dislike">Error: {{ error }}</p>
+    </div>
+    {% when None %}
+    {% endmatch %}
+
+    {% if gcal_connected %}
+    <div class="card">
+        <p class="badge badge-active">Connected to Google Calendar</p>
+    </div>
+    {% else %}
+    {% if !gcal_fields_filled %}
+    <p class="sync-hint"><small>Fill in and save Client ID and Secret above, then click Connect.</small></p>
+    {% endif %}
+    {% endif %}
+
+    {% if gcal_show_picker %}
+    <div class="card">
+        <h4>Select a calendar</h4>
+        {% if gcal_calendars.is_empty() %}
+        <p>No writable calendars found in your Google account.</p>
+        {% else %}
+        <form method="post" action="/sync/gcal/calendar">
+            <div class="calendar-picker-list">
+                {% for cal in gcal_calendars %}
+                <label class="calendar-picker-item">
+                    <input type="radio" name="calendar_id" value="{{ cal.id }}"
+                        {% if cal.is_primary %}checked{% endif %}>
+                    <span>{{ cal.summary }}</span>
+                    {% if cal.is_primary %}
+                    <span class="calendar-picker-badge">primary</span>
+                    {% endif %}
+                </label>
+                {% endfor %}
+            </div>
+            <div class="settings-actions">
+                <button type="submit">Save &amp; Sync</button>
+            </div>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
+</details>
 
 {% if let Some(results) = results %}
 <div class="card">
