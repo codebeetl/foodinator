@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ theme }}">
+<html lang="en" data-theme="{{ ctx.theme }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -15,8 +15,8 @@
             <a href="/consumers">Consumers</a>
             <a href="/meals">Meals</a>
             <a href="/plan">Plan</a>
-            {% if ha_configured %}<a href="/sync">Sync</a>{% endif %}
-            {% if display_configured %}<a href="/display/preview">Display</a>{% endif %}
+            {% if ctx.ha_configured %}<a href="/sync">Sync</a>{% endif %}
+            {% if ctx.display_configured %}<a href="/display/preview">Display</a>{% endif %}
             <a href="/settings">Settings</a>
         </nav>
     </header>

@@ -6,7 +6,7 @@ use axum::Router;
 use serde::Deserialize;
 
 use crate::db::consumers::{self, Consumer};
-use crate::state::AppState;
+use crate::state::{AppState, PageContext};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -18,9 +18,7 @@ pub fn router() -> Router<AppState> {
 #[template(path = "consumers/list.html")]
 struct ConsumersListTemplate {
     consumers: Vec<Consumer>,
-    ha_configured: bool,
-    display_configured: bool,
-    theme: String,
+    ctx: PageContext,
 }
 
 impl IntoResponse for ConsumersListTemplate {
@@ -35,9 +33,7 @@ async fn list(State(state): State<AppState>) -> ConsumersListTemplate {
         .expect("failed to list consumers");
     ConsumersListTemplate {
         consumers,
-        ha_configured: state.ha_client().await.is_some(),
-        display_configured: state.display_token.is_some(),
-        theme: state.theme().await,
+        ctx: state.page_context().await,
     }
 }
 

@@ -15,6 +15,22 @@ pub struct MealPlanEntry {
     pub updated_at: DateTime<Utc>,
 }
 
+impl MealPlanEntry {
+    /// The start time in effect for this entry: the per-day override if one
+    /// is set, otherwise the household's default. Shared by the plan page,
+    /// the kiosk, and the HA sync job, so "override vs default" stays a
+    /// meal-plan concern instead of being re-derived in each handler.
+    pub fn effective_start_time(&self, default_start_time: NaiveTime) -> NaiveTime {
+        self.start_time_override.unwrap_or(default_start_time)
+    }
+
+    /// The duration in effect, mirroring `effective_start_time`.
+    pub fn effective_duration_minutes(&self, default_duration_minutes: i32) -> i32 {
+        self.duration_minutes_override
+            .unwrap_or(default_duration_minutes)
+    }
+}
+
 /// A meal alongside how a given set of attendees feels about it. Never
 /// excludes - the picker UI flags liked/disliked meals rather than hiding
 /// them, since a hard exclusion could leave the list empty.

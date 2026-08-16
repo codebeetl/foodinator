@@ -7,7 +7,7 @@ use chrono::NaiveTime;
 use serde::Deserialize;
 
 use crate::db::settings::{self, AppSettings, HaConfig};
-use crate::state::AppState;
+use crate::state::{AppState, PageContext};
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -27,9 +27,7 @@ enum TestResult {
 #[template(path = "settings.html")]
 struct SettingsTemplate {
     settings: AppSettings,
-    ha_configured: bool,
-    display_configured: bool,
-    theme: String,
+    ctx: PageContext,
     // Only set right after a Test Connection submission - the typed (not
     // necessarily saved) values are echoed back so the URL/entity-ID fields
     // don't appear to reset, without ever echoing the token itself.
@@ -45,23 +43,16 @@ impl IntoResponse for SettingsTemplate {
     }
 }
 
-fn non_empty(s: &str) -> Option<&str> {
-    let trimmed = s.trim();
-    (!trimmed.is_empty()).then_some(trimmed)
-}
-
 async fn show(State(state): State<AppState>) -> SettingsTemplate {
     let settings = settings::get(&state.pool)
         .await
         .expect("failed to fetch settings");
-    let ha_configured = state.ha_client().await.is_some();
+    let ctx = PageContext::from_state(&state, &settings);
     SettingsTemplate {
         ha_url_input: settings.ha_url.clone().unwrap_or_default(),
         ha_calendar_entity_id_input: settings.ha_calendar_entity_id.clone().unwrap_or_default(),
-        theme: settings.theme.clone(),
         settings,
-        ha_configured,
-        display_configured: state.display_token.is_some(),
+        ctx,
         test_result: None,
         app_version: APP_VERSION,
     }
@@ -90,9 +81,9 @@ async fn update(State(state): State<AppState>, Form(form): Form<UpdateSettingsFo
     .expect("failed to update settings");
     settings::update_ha(
         &state.pool,
-        non_empty(&form.ha_url),
-        non_empty(&form.ha_token),
-        non_empty(&form.ha_calendar_entity_id),
+        super::non_empty(&form.ha_url),
+        super::non_empty(&form.ha_token),
+        super::non_empty(&form.ha_calendar_entity_id),
     )
     .await
     .expect("failed to update HA settings");
@@ -121,13 +112,13 @@ async fn effective_test_config(state: &AppState, form: &HaTestForm) -> Option<Ha
         state.ha_env_calendar_entity_id.as_deref(),
     );
 
-    let url = non_empty(&form.ha_url)
+    let url = super::non_empty(&form.ha_url)
         .map(str::to_string)
         .or_else(|| current.as_ref().map(|c| c.url.clone()))?;
-    let token = non_empty(&form.ha_token)
+    let token = super::non_empty(&form.ha_token)
         .map(str::to_string)
         .or_else(|| current.as_ref().map(|c| c.token.clone()))?;
-    let calendar_entity_id = non_empty(&form.ha_calendar_entity_id)
+    let calendar_entity_id = super::non_empty(&form.ha_calendar_entity_id)
         .map(str::to_string)
         .or_else(|| current.as_ref().map(|c| c.calendar_entity_id.clone()))?;
 
@@ -158,12 +149,10 @@ async fn test_ha_connection(
     let settings = settings::get(&state.pool)
         .await
         .expect("failed to fetch settings");
-    let ha_configured = state.ha_client().await.is_some();
+    let ctx = PageContext::from_state(&state, &settings);
     SettingsTemplate {
-        theme: settings.theme.clone(),
         settings,
-        ha_configured,
-        display_configured: state.display_token.is_some(),
+        ctx,
         ha_url_input: form.ha_url,
         ha_calendar_entity_id_input: form.ha_calendar_entity_id,
         test_result,

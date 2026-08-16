@@ -42,6 +42,13 @@ pub(crate) fn is_ajax_request(headers: &axum::http::HeaderMap) -> bool {
         .is_some_and(|v| v == "XMLHttpRequest")
 }
 
+/// The trimmed string if non-empty, else None - shared by the plan and
+/// settings forms, which both treat a blank submission as "no value."
+pub(crate) fn non_empty(s: &str) -> Option<&str> {
+    let trimmed = s.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/", get(root))

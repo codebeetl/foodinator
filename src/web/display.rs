@@ -5,12 +5,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Json;
 use axum::Router;
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use crate::clock;
 use crate::db::{consumers, meal_plan, meals, settings, sync as sync_db};
-use crate::state::AppState;
+use crate::state::{AppState, PageContext};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -34,18 +34,6 @@ fn authorize(state: &AppState, token: Option<&str>) -> Result<(), StatusCode> {
     Ok(())
 }
 
-/// The week_start_weekday occurrence that begins the week containing
-/// `today`. Deliberately the mirror of plan::next_week_start (which only
-/// looks forward, since /plan is for planning the *upcoming* week): /display
-/// is a status view, so it must always be able to mark exactly one card as
-/// "today," which means walking backward to the most recent match when
-/// today isn't itself the start weekday.
-fn week_containing(today: NaiveDate, week_start_weekday: i16) -> NaiveDate {
-    let days_since =
-        (today.weekday().num_days_from_monday() as i64 - week_start_weekday as i64).rem_euclid(7);
-    today - Duration::days(days_since)
-}
-
 /// Every field here is already formatted exactly as it should appear on
 /// screen, so the initial server render and a later JSON poll produce
 /// identical text for the same underlying data - the poll only ever swaps
@@ -67,7 +55,11 @@ async fn build_days(state: &AppState) -> (NaiveDate, Vec<DisplayDay>) {
         .await
         .expect("failed to load settings");
     let today = clock::today(&state.household_tz);
-    let week_start = week_containing(today, app_settings.week_start_weekday);
+    let week_start = clock::nearest_week_start(
+        today,
+        app_settings.week_start_weekday,
+        clock::WeekStartDirection::Backward,
+    );
     let ha_configured = state.ha_client().await.is_some();
 
     let all_consumers = consumers::list_all(&state.pool)
@@ -108,9 +100,7 @@ async fn build_days(state: &AppState) -> (NaiveDate, Vec<DisplayDay>) {
                 } else {
                     None
                 };
-                let start_time = entry
-                    .start_time_override
-                    .unwrap_or(app_settings.default_start_time);
+                let start_time = entry.effective_start_time(app_settings.default_start_time);
                 let notes = entry.notes.filter(|_| is_today).filter(|n| !n.is_empty());
 
                 DisplayDay {
@@ -184,9 +174,7 @@ async fn data(State(state): State<AppState>, Query(query): Query<DisplayQuery>) 
 #[template(path = "display_preview.html")]
 struct DisplayPreviewTemplate {
     display_path: String,
-    ha_configured: bool,
-    display_configured: bool,
-    theme: String,
+    ctx: PageContext,
 }
 
 impl IntoResponse for DisplayPreviewTemplate {
@@ -202,9 +190,7 @@ async fn preview(State(state): State<AppState>) -> Response {
 
     DisplayPreviewTemplate {
         display_path: format!("/display?token={token}"),
-        ha_configured: state.ha_client().await.is_some(),
-        display_configured: true,
-        theme: state.theme().await,
+        ctx: state.page_context().await,
     }
     .into_response()
 }
@@ -214,36 +200,10 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    use chrono::Datelike;
     use sqlx::postgres::PgPoolOptions;
     use sqlx::PgPool;
     use tower::ServiceExt;
-
-    #[test]
-    fn week_containing_finds_the_nearest_matching_weekday_on_or_before_today() {
-        let monday = NaiveDate::from_ymd_opt(2026, 8, 3).unwrap();
-        let wednesday = NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
-        let saturday = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
-
-        // week_start_weekday=5 (Saturday) - the default.
-        assert_eq!(
-            week_containing(saturday, 5),
-            saturday,
-            "today counts as a match"
-        );
-        assert_eq!(
-            week_containing(monday, 5),
-            NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
-            "backward-only: last Saturday, not next week's"
-        );
-
-        // week_start_weekday=2 (Wednesday) - a household with a different planning day.
-        assert_eq!(week_containing(wednesday, 2), wednesday);
-        assert_eq!(
-            week_containing(saturday, 2),
-            wednesday,
-            "today (Saturday) should fall within the week that started this Wednesday"
-        );
-    }
 
     async fn pin_week_start_to_today(pool: &PgPool, today: NaiveDate) {
         let current = settings::get(pool).await.expect("failed to load settings");

@@ -4,7 +4,7 @@
 
 {% block content %}
 <h2>Sync to Home Assistant</h2>
-{% if ha_configured %}
+{% if ctx.ha_configured %}
 <div class="card">
     <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
     14 days to your Home Assistant calendar. Once an entry is synced it

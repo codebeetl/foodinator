@@ -6,7 +6,7 @@ use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
+use chrono::{Duration, NaiveDate, NaiveTime};
 use serde::Deserialize;
 use sqlx::PgPool;
 
@@ -14,7 +14,7 @@ use crate::clock;
 use crate::db::consumers::{self, Consumer};
 use crate::db::meal_plan;
 use crate::db::settings;
-use crate::state::AppState;
+use crate::state::{AppState, PageContext};
 
 const ATTENDEE_FIELD_PREFIX: &str = "attendee_";
 const GUEST_FIELD_PREFIX: &str = "guest_name_";
@@ -24,15 +24,6 @@ pub fn router() -> Router<AppState> {
         .route("/plan", get(show))
         .route("/plan/{date}", post(update))
         .route("/plan/{date}/delete", post(delete))
-}
-
-/// The nearest date whose weekday matches `week_start_weekday`
-/// (0=Monday..6=Sunday, per app_settings.week_start_weekday), inclusive of
-/// today.
-fn next_week_start(today: NaiveDate, week_start_weekday: i16) -> NaiveDate {
-    let days_ahead =
-        (week_start_weekday as i64 - today.weekday().num_days_from_monday() as i64).rem_euclid(7);
-    today + Duration::days(days_ahead)
 }
 
 struct PlanDay {
@@ -72,9 +63,7 @@ struct PlanTemplate {
     upcoming_week_start: Option<NaiveDate>,
     days: Vec<PlanDay>,
     consumers: Vec<Consumer>,
-    ha_configured: bool,
-    display_configured: bool,
-    theme: String,
+    ctx: PageContext,
 }
 
 impl IntoResponse for PlanTemplate {
@@ -160,11 +149,11 @@ async fn build_plan_day(
             .unwrap_or_default(),
         effective_start_time: live_entry
             .as_ref()
-            .and_then(|entry| entry.start_time_override)
+            .map(|entry| entry.effective_start_time(default_start_time))
             .unwrap_or(default_start_time),
         effective_duration_minutes: live_entry
             .as_ref()
-            .and_then(|entry| entry.duration_minutes_override)
+            .map(|entry| entry.effective_duration_minutes(default_duration_minutes))
             .unwrap_or(default_duration_minutes),
         guest_names: live_entry
             .as_ref()
@@ -179,9 +168,10 @@ async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> 
     let app_settings = settings::get(&state.pool)
         .await
         .expect("failed to load settings");
-    let upcoming_week_start = next_week_start(
+    let upcoming_week_start = clock::nearest_week_start(
         clock::today(&state.household_tz),
         app_settings.week_start_weekday,
+        clock::WeekStartDirection::Forward,
     );
     let week_start = query.start.unwrap_or(upcoming_week_start);
 
@@ -209,9 +199,7 @@ async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> 
         upcoming_week_start: (week_start != upcoming_week_start).then_some(upcoming_week_start),
         days,
         consumers,
-        ha_configured: state.ha_client().await.is_some(),
-        display_configured: state.display_token.is_some(),
-        theme: app_settings.theme,
+        ctx: PageContext::from_state(&state, &app_settings),
     }
 }
 
@@ -228,11 +216,6 @@ struct UpdatePlanForm {
     dynamic_fields: HashMap<String, String>,
 }
 
-fn non_empty(s: &str) -> Option<&str> {
-    let trimmed = s.trim();
-    (!trimmed.is_empty()).then_some(trimmed)
-}
-
 fn guest_names_from_form(dynamic_fields: &HashMap<String, String>) -> Vec<String> {
     let mut entries: Vec<(usize, String)> = dynamic_fields
         .iter()
@@ -241,7 +224,7 @@ fn guest_names_from_form(dynamic_fields: &HashMap<String, String>) -> Vec<String
                 .strip_prefix(GUEST_FIELD_PREFIX)?
                 .parse::<usize>()
                 .ok()?;
-            let name = non_empty(value)?.to_string();
+            let name = super::non_empty(value)?.to_string();
             Some((index, name))
         })
         .collect();
@@ -259,7 +242,7 @@ async fn update(
         .await
         .expect("failed to load settings");
 
-    let notes = non_empty(&form.notes);
+    let notes = super::non_empty(&form.notes);
     let meal_time = form
         .meal_time
         .parse::<NaiveTime>()
@@ -362,31 +345,6 @@ mod tests {
     use axum::http::{header, Request, StatusCode};
     use sqlx::PgPool;
     use tower::ServiceExt;
-
-    #[test]
-    fn next_week_start_finds_the_nearest_matching_weekday_inclusive_of_today() {
-        // All three fall in the same calendar week, in forward order.
-        let monday = NaiveDate::from_ymd_opt(2026, 8, 3).unwrap();
-        let wednesday = NaiveDate::from_ymd_opt(2026, 8, 5).unwrap();
-        let saturday = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
-
-        // week_start_weekday=5 (Saturday) - today's existing default behavior.
-        assert_eq!(
-            next_week_start(saturday, 5),
-            saturday,
-            "today counts as a match"
-        );
-        assert_eq!(next_week_start(monday, 5), saturday);
-
-        // week_start_weekday=2 (Wednesday) - a household with a different planning day.
-        assert_eq!(next_week_start(wednesday, 2), wednesday);
-        assert_eq!(next_week_start(monday, 2), wednesday);
-        assert_eq!(
-            next_week_start(saturday, 2),
-            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
-            "forward-only: the next Wednesday, not last week's"
-        );
-    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn planning_a_day_through_the_form_persists_meal_and_attendance(

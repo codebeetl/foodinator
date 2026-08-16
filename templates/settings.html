@@ -40,7 +40,7 @@
     token is already stored rather than clearing it - blank the URL or
     calendar entity ID instead to disable. Sync-related pages and the "Sync"
     nav link only appear once all three resolve to a value.
-    {% if ha_configured %}Currently <strong>configured</strong>.{% else %}Currently <strong>not configured</strong>.{% endif %}</p>
+    {% if ctx.ha_configured %}Currently <strong>configured</strong>.{% else %}Currently <strong>not configured</strong>.{% endif %}</p>
 
     <label>HA URL
         <input type="text" name="ha_url" value="{{ ha_url_input }}" placeholder="http://homeassistant.local:8123">

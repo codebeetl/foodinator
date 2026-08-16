@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::meals::{self, Meal};
 use crate::db::preferences::{self, ConsumerPreference};
-use crate::state::AppState;
+use crate::state::{AppState, PageContext};
 
 const PREFERENCE_FIELD_PREFIX: &str = "preference_";
 
@@ -58,9 +58,7 @@ struct MealRow {
 struct MealsListTemplate {
     rows: Vec<MealRow>,
     duplicate: bool,
-    ha_configured: bool,
-    display_configured: bool,
-    theme: String,
+    ctx: PageContext,
     sort: String,
     dir: String,
 }
@@ -175,9 +173,7 @@ async fn list(State(state): State<AppState>, Query(query): Query<ListQuery>) -> 
             "desc".to_string()
         },
         duplicate: query.duplicate,
-        ha_configured: state.ha_client().await.is_some(),
-        display_configured: state.display_token.is_some(),
-        theme: state.theme().await,
+        ctx: state.page_context().await,
     }
 }
 
@@ -213,9 +209,7 @@ struct MealEditTemplate {
     // meals.name is UNIQUE, so this is the server-side backstop for anyone
     // who renames to a name that already exists.
     name_conflict: bool,
-    ha_configured: bool,
-    display_configured: bool,
-    theme: String,
+    ctx: PageContext,
 }
 
 impl IntoResponse for MealEditTemplate {
@@ -249,9 +243,7 @@ async fn edit_form(
         preferences,
         delete_blocked_by_plan_history: query.delete_blocked,
         name_conflict: query.duplicate,
-        ha_configured: state.ha_client().await.is_some(),
-        display_configured: state.display_token.is_some(),
-        theme: state.theme().await,
+        ctx: state.page_context().await,
     })
 }
 

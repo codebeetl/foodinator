@@ -53,6 +53,20 @@ pub struct SyncCandidate {
     pub attendee_names: Vec<String>,
 }
 
+impl SyncCandidate {
+    /// Mirrors `MealPlanEntry::effective_start_time` so the sync job resolves
+    /// overrides the same way every other consumer does.
+    pub fn effective_start_time(&self, default_start_time: NaiveTime) -> NaiveTime {
+        self.start_time_override.unwrap_or(default_start_time)
+    }
+
+    /// Mirrors `MealPlanEntry::effective_duration_minutes`.
+    pub fn effective_duration_minutes(&self, default_duration_minutes: i32) -> i32 {
+        self.duration_minutes_override
+            .unwrap_or(default_duration_minutes)
+    }
+}
+
 /// Non-deleted, not-yet-successfully-synced entries within `horizon_days` of
 /// `today` - the ledger (not HA) is the source of truth for what's already
 /// synced, since HA's REST API has no update/delete service to correct a

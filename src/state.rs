@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chrono_tz::Tz;
 use sqlx::PgPool;
 
-use crate::db::settings::{self, HaConfig};
+use crate::db::settings::{self, AppSettings, HaConfig};
 use crate::ha::CalendarSync;
 
 /// Builds a CalendarSync from a resolved HaConfig. Indirected through a
@@ -45,14 +45,48 @@ impl AppState {
         Some((self.ha_client_factory)(config))
     }
 
-    /// The saved theme preference ("light", "dark", or "auto"). Reads fresh
-    /// every call, same rationale as `ha_client` - a Settings-page edit
-    /// should take effect on the very next request.
-    pub async fn theme(&self) -> String {
-        settings::get(&self.pool)
+    /// The nav-chrome context shared by every page (theme + which optional
+    /// features are configured). Reads app_settings fresh every call, same
+    /// rationale as `ha_client` - a Settings-page edit should take effect on
+    /// the very next request. Handlers that already fetched app_settings for
+    /// their own logic should use `PageContext::from_state` instead of this,
+    /// to avoid a second settings read.
+    pub async fn page_context(&self) -> PageContext {
+        let app_settings = settings::get(&self.pool)
             .await
-            .expect("failed to load settings")
-            .theme
+            .expect("failed to load settings");
+        PageContext::from_state(self, &app_settings)
+    }
+}
+
+/// The fields every page template needs from app_settings (its theme, and
+/// whether the optional HA/display features are configured), collected in one
+/// place so the six page handlers don't each re-derive them. base.html reads
+/// them off this struct via `ctx.*`.
+#[derive(Debug, Clone)]
+pub struct PageContext {
+    pub ha_configured: bool,
+    pub display_configured: bool,
+    pub theme: String,
+}
+
+impl PageContext {
+    /// Builds the context from already-loaded settings. `ha_configured` is
+    /// derived from `resolve_ha_config` directly (not by building a client),
+    /// since "is HA configured" is exactly "does the config resolve" - same
+    /// result, no client allocation and no settings round-trip.
+    pub fn from_state(state: &AppState, settings: &AppSettings) -> Self {
+        PageContext {
+            ha_configured: settings::resolve_ha_config(
+                settings,
+                state.ha_env_url.as_deref(),
+                state.ha_env_token.as_deref(),
+                state.ha_env_calendar_entity_id.as_deref(),
+            )
+            .is_some(),
+            display_configured: state.display_token.is_some(),
+            theme: settings.theme.clone(),
+        }
     }
 }
 

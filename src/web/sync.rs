@@ -8,7 +8,7 @@ use chrono::{Duration, NaiveDate};
 use crate::clock;
 use crate::db::{settings, sync as sync_db};
 use crate::ha::sync as ha_sync;
-use crate::state::AppState;
+use crate::state::{AppState, PageContext};
 
 /// Only entries within this many days are eligible to sync - see
 /// ha::sync::is_within_sync_horizon for why (HA has no update service, so
@@ -33,9 +33,7 @@ struct SyncResults {
 #[derive(Template)]
 #[template(path = "sync.html")]
 struct SyncTemplate {
-    ha_configured: bool,
-    display_configured: bool,
-    theme: String,
+    ctx: PageContext,
     results: Option<SyncResults>,
 }
 
@@ -47,9 +45,7 @@ impl IntoResponse for SyncTemplate {
 
 async fn show(State(state): State<AppState>) -> SyncTemplate {
     SyncTemplate {
-        ha_configured: state.ha_client().await.is_some(),
-        display_configured: state.display_token.is_some(),
-        theme: state.theme().await,
+        ctx: state.page_context().await,
         results: None,
     }
 }
@@ -57,9 +53,7 @@ async fn show(State(state): State<AppState>) -> SyncTemplate {
 async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
     let Some(ha_client) = state.ha_client().await else {
         return SyncTemplate {
-            ha_configured: false,
-            display_configured: state.display_token.is_some(),
-            theme: state.theme().await,
+            ctx: state.page_context().await,
             results: None,
         };
     };
@@ -76,12 +70,9 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
     let mut failed = Vec::new();
 
     for candidate in candidates {
-        let start_time = candidate
-            .start_time_override
-            .unwrap_or(app_settings.default_start_time);
-        let duration_minutes = candidate
-            .duration_minutes_override
-            .unwrap_or(app_settings.default_duration_minutes);
+        let start_time = candidate.effective_start_time(app_settings.default_start_time);
+        let duration_minutes =
+            candidate.effective_duration_minutes(app_settings.default_duration_minutes);
 
         let start_utc =
             clock::household_datetime_utc(&state.household_tz, candidate.entry_date, start_time);
@@ -129,9 +120,7 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
     }
 
     SyncTemplate {
-        ha_configured: true,
-        display_configured: state.display_token.is_some(),
-        theme: app_settings.theme,
+        ctx: PageContext::from_state(&state, &app_settings),
         results: Some(SyncResults { synced, failed }),
     }
 }
