@@ -319,6 +319,27 @@ fn build_redirect_uri(scheme: &str, host: &str) -> String {
     format!("{scheme}://{host}/sync/gcal/callback")
 }
 
+/// Google only allows "localhost" as an OAuth redirect host. Rewrite private
+/// IPs to localhost while preserving the port so the URI matches what's
+/// registered in the Cloud Console (e.g. `http://localhost:666/sync/gcal/callback`).
+fn rewrite_private_host(host: &str) -> String {
+    let is_private = host
+        .split(':')
+        .next()
+        .and_then(|h| h.parse::<std::net::IpAddr>().ok())
+        .is_some_and(|ip| match ip {
+            std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback(),
+        });
+    if !is_private {
+        return host.to_string();
+    }
+    match host.find(':') {
+        Some(pos) => format!("localhost{}", &host[pos..]),
+        None => "localhost".to_string(),
+    }
+}
+
 async fn gcal_auth(State(state): State<AppState>, origin: RequestOrigin) -> Redirect {
     let settings = settings::get(&state.pool)
         .await
@@ -331,26 +352,12 @@ async fn gcal_auth(State(state): State<AppState>, origin: RequestOrigin) -> Redi
         return Redirect::temporary("/sync?gcal_error=not_configured");
     }
 
-    let redirect_uri = build_redirect_uri(&origin.scheme, &origin.host);
+    // Google only allows "localhost" as a redirect host — rewrite private IPs
+    // to localhost so the redirect URI matches what's registered in the console.
+    let redirect_host = rewrite_private_host(&origin.host);
 
-    // Google requires device_id and device_name when the redirect URI points
-    // to a private/internal IP address.
-    let host_is_private_ip = origin
-        .host
-        .split(':')
-        .next()
-        .and_then(|h| h.parse::<std::net::IpAddr>().ok())
-        .is_some_and(|ip| match ip {
-            std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
-            std::net::IpAddr::V6(v6) => v6.is_loopback(),
-        });
-    let (device_id, device_name) = if host_is_private_ip {
-        (Some(origin.host.as_str()), Some("foodinator"))
-    } else {
-        (None, None)
-    };
-
-    let auth_url = gcal::build_auth_url(client_id, &redirect_uri, device_id, device_name);
+    let redirect_uri = build_redirect_uri(&origin.scheme, &redirect_host);
+    let auth_url = gcal::build_auth_url(client_id, &redirect_uri, None, None);
 
     Redirect::temporary(&auth_url)
 }
@@ -386,7 +393,7 @@ async fn gcal_callback(
         return Redirect::temporary("/sync?gcal_error=not_configured");
     };
 
-    let redirect_uri = build_redirect_uri(&origin.scheme, &origin.host);
+    let redirect_uri = build_redirect_uri(&origin.scheme, &rewrite_private_host(&origin.host));
 
     match gcal::exchange_code(
         &gcal_config.client_id,
