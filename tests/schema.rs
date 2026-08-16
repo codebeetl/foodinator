@@ -17,6 +17,7 @@ async fn migrations_create_expected_tables(pool: sqlx::PgPool) -> sqlx::Result<(
         "consumer_meal_preferences",
         "app_settings",
         "ha_calendar_sync",
+        "gcal_calendar_sync",
     ] {
         assert!(
             tables.iter().any(|t| t == expected),

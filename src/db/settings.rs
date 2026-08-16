@@ -10,6 +10,13 @@ pub struct AppSettings {
     pub ha_url: Option<String>,
     pub ha_token: Option<String>,
     pub ha_calendar_entity_id: Option<String>,
+    // Google Calendar OAuth2 fields (nullable - integration is disabled until
+    // client_id, client_secret, and calendar_id all resolve to a value).
+    pub gcal_client_id: Option<String>,
+    pub gcal_client_secret: Option<String>,
+    pub gcal_calendar_id: Option<String>,
+    // Set by the OAuth2 callback; never shown in the UI.
+    pub gcal_refresh_token: Option<String>,
     // 0=Monday .. 6=Sunday, matching chrono's Weekday::num_days_from_monday().
     pub week_start_weekday: i16,
     // "light", "dark", or "auto" - enforced by a CHECK constraint in the DB.
@@ -24,6 +31,17 @@ pub struct HaConfig {
     pub url: String,
     pub token: String,
     pub calendar_entity_id: String,
+}
+
+/// The fully-resolved set of Google Calendar connection details. Unlike HA,
+/// GCal has no env-var fallbacks — the OAuth2 client ID and secret are
+/// per-user and stored entirely in the DB.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GcalConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub calendar_id: String,
+    pub refresh_token: String,
 }
 
 /// Merges per-field DB overrides over env-var fallbacks. HA is only
@@ -54,11 +72,25 @@ pub fn resolve_ha_config(
     })
 }
 
+/// Resolves GCal config from DB fields only (no env-var fallbacks).
+/// GCal is considered configured only when client_id, client_secret,
+/// calendar_id, and refresh_token are all present.
+pub fn resolve_gcal_config(settings: &AppSettings) -> Option<GcalConfig> {
+    Some(GcalConfig {
+        client_id: settings.gcal_client_id.clone()?,
+        client_secret: settings.gcal_client_secret.clone()?,
+        calendar_id: settings.gcal_calendar_id.clone()?,
+        refresh_token: settings.gcal_refresh_token.clone()?,
+    })
+}
+
 pub async fn get(pool: &PgPool) -> sqlx::Result<AppSettings> {
     sqlx::query_as!(
         AppSettings,
         "SELECT default_start_time, default_duration_minutes, \
-           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at \
+           ha_url, ha_token, ha_calendar_entity_id, \
+           gcal_client_id, gcal_client_secret, gcal_calendar_id, gcal_refresh_token, \
+           week_start_weekday, theme, updated_at \
          FROM app_settings WHERE id = 1"
     )
     .fetch_one(pool)
@@ -77,7 +109,9 @@ pub async fn update(
         "UPDATE app_settings SET default_start_time = $1, default_duration_minutes = $2, \
          week_start_weekday = $3, theme = $4, updated_at = now() WHERE id = 1 \
          RETURNING default_start_time, default_duration_minutes, \
-           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at",
+           ha_url, ha_token, ha_calendar_entity_id, \
+           gcal_client_id, gcal_client_secret, gcal_calendar_id, gcal_refresh_token, \
+           week_start_weekday, theme, updated_at",
         default_start_time,
         default_duration_minutes,
         week_start_weekday,
@@ -112,13 +146,56 @@ pub async fn update_ha(
            updated_at = now() \
          WHERE id = 1 \
          RETURNING default_start_time, default_duration_minutes, \
-           ha_url, ha_token, ha_calendar_entity_id, week_start_weekday, theme, updated_at",
+           ha_url, ha_token, ha_calendar_entity_id, \
+           gcal_client_id, gcal_client_secret, gcal_calendar_id, gcal_refresh_token, \
+           week_start_weekday, theme, updated_at",
         ha_url,
         ha_token,
         ha_calendar_entity_id
     )
     .fetch_one(pool)
     .await
+}
+
+/// Updates the Google Calendar override fields. `client_id` and `calendar_id`
+/// are set verbatim (None clears them). `client_secret` follows the same
+/// password-field convention as `ha_token`: blank means "keep existing".
+pub async fn update_gcal(
+    pool: &PgPool,
+    gcal_client_id: Option<&str>,
+    gcal_client_secret: Option<&str>,
+    gcal_calendar_id: Option<&str>,
+) -> sqlx::Result<AppSettings> {
+    sqlx::query_as!(
+        AppSettings,
+        "UPDATE app_settings SET \
+           gcal_client_id = $1, \
+           gcal_client_secret = COALESCE($2, gcal_client_secret), \
+           gcal_calendar_id = $3, \
+           updated_at = now() \
+         WHERE id = 1 \
+         RETURNING default_start_time, default_duration_minutes, \
+           ha_url, ha_token, ha_calendar_entity_id, \
+           gcal_client_id, gcal_client_secret, gcal_calendar_id, gcal_refresh_token, \
+           week_start_weekday, theme, updated_at",
+        gcal_client_id,
+        gcal_client_secret,
+        gcal_calendar_id
+    )
+    .fetch_one(pool)
+    .await
+}
+
+/// Stores the OAuth2 refresh token obtained after the user completes the
+/// Google consent flow.
+pub async fn set_gcal_refresh_token(pool: &PgPool, token: &str) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE app_settings SET gcal_refresh_token = $1, updated_at = now() WHERE id = 1",
+        token
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -193,6 +270,18 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
+    async fn settings_start_with_no_gcal_override(pool: PgPool) -> sqlx::Result<()> {
+        let settings = get(&pool).await?;
+
+        assert_eq!(settings.gcal_client_id, None);
+        assert_eq!(settings.gcal_client_secret, None);
+        assert_eq!(settings.gcal_calendar_id, None);
+        assert_eq!(settings.gcal_refresh_token, None);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
     async fn update_ha_sets_url_and_entity_id_verbatim_but_keeps_token_when_blank(
         pool: PgPool,
     ) -> sqlx::Result<()> {
@@ -246,6 +335,10 @@ mod tests {
             ha_url: None,
             ha_token: None,
             ha_calendar_entity_id: None,
+            gcal_client_id: None,
+            gcal_client_secret: None,
+            gcal_calendar_id: None,
+            gcal_refresh_token: None,
             week_start_weekday: 5,
             theme: "auto".to_string(),
             updated_at: Utc::now(),
@@ -288,5 +381,90 @@ mod tests {
             resolved.url, "http://ha-override.local",
             "DB override should win over the env default"
         );
+    }
+
+    #[test]
+    fn resolve_gcal_config_requires_all_fields() {
+        let base = AppSettings {
+            default_start_time: NaiveTime::from_hms_opt(18, 30, 0).unwrap(),
+            default_duration_minutes: 30,
+            ha_url: None,
+            ha_token: None,
+            ha_calendar_entity_id: None,
+            gcal_client_id: None,
+            gcal_client_secret: None,
+            gcal_calendar_id: None,
+            gcal_refresh_token: None,
+            week_start_weekday: 5,
+            theme: "auto".to_string(),
+            updated_at: Utc::now(),
+        };
+
+        assert_eq!(resolve_gcal_config(&base), None);
+
+        let partial = AppSettings {
+            gcal_client_id: Some("client-id".to_string()),
+            gcal_client_secret: Some("client-secret".to_string()),
+            ..base.clone()
+        };
+        assert_eq!(resolve_gcal_config(&partial), None, "missing calendar_id");
+
+        let full = AppSettings {
+            gcal_client_id: Some("client-id".to_string()),
+            gcal_client_secret: Some("client-secret".to_string()),
+            gcal_calendar_id: Some("family@group.calendar.google.com".to_string()),
+            gcal_refresh_token: Some("refresh-token".to_string()),
+            ..base
+        };
+        assert_eq!(
+            resolve_gcal_config(&full),
+            Some(GcalConfig {
+                client_id: "client-id".to_string(),
+                client_secret: "client-secret".to_string(),
+                calendar_id: "family@group.calendar.google.com".to_string(),
+                refresh_token: "refresh-token".to_string(),
+            })
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn update_gcal_sets_fields_and_keeps_secret_when_blank(pool: PgPool) -> sqlx::Result<()> {
+        let first = update_gcal(
+            &pool,
+            Some("client-id"),
+            Some("client-secret"),
+            Some("calendar@cal"),
+        )
+        .await?;
+        assert_eq!(first.gcal_client_id.as_deref(), Some("client-id"));
+        assert_eq!(first.gcal_client_secret.as_deref(), Some("client-secret"));
+        assert_eq!(first.gcal_calendar_id.as_deref(), Some("calendar@cal"));
+
+        let second = update_gcal(&pool, Some("new-id"), None, Some("new-cal")).await?;
+        assert_eq!(second.gcal_client_id.as_deref(), Some("new-id"));
+        assert_eq!(
+            second.gcal_client_secret.as_deref(),
+            Some("client-secret"),
+            "blank secret submission should keep the stored secret"
+        );
+        assert_eq!(second.gcal_calendar_id.as_deref(), Some("new-cal"));
+
+        let cleared = update_gcal(&pool, None, None, Some("new-cal")).await?;
+        assert_eq!(cleared.gcal_client_id, None, "None should clear client_id");
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn set_gcal_refresh_token_persists(pool: PgPool) -> sqlx::Result<()> {
+        set_gcal_refresh_token(&pool, "my-refresh-token").await?;
+
+        let settings = get(&pool).await?;
+        assert_eq!(
+            settings.gcal_refresh_token.as_deref(),
+            Some("my-refresh-token")
+        );
+
+        Ok(())
     }
 }

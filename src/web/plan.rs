@@ -651,7 +651,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn nav_hides_the_sync_link_when_ha_is_not_configured(pool: PgPool) -> sqlx::Result<()> {
+    async fn nav_always_shows_sync_link_regardless_of_ha_config(pool: PgPool) -> sqlx::Result<()> {
         let mut state = crate::state::test_app_state(pool);
         state.ha_env_url = None;
         state.ha_env_token = None;
@@ -672,8 +672,8 @@ mod tests {
             .unwrap();
         let html = String::from_utf8(body.to_vec()).unwrap();
         assert!(
-            !html.contains(r#"href="/sync""#),
-            "Sync nav link should be hidden when HA isn't configured: {html}"
+            html.contains(r#"href="/sync""#),
+            "Sync nav link should always be visible: {html}"
         );
 
         Ok(())

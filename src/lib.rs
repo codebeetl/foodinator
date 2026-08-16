@@ -1,6 +1,7 @@
 pub mod clock;
 pub mod config;
 pub mod db;
+pub mod gcal;
 pub mod ha;
 pub mod state;
 pub mod web;

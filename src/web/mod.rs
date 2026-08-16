@@ -1,4 +1,3 @@
-mod admin;
 mod auth;
 mod consumers;
 mod display;
@@ -57,7 +56,6 @@ pub fn router(state: AppState) -> Router {
         .merge(plan::router())
         .merge(settings::router())
         .merge(sync::router())
-        .merge(admin::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_basic_auth,

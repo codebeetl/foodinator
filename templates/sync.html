@@ -3,23 +3,54 @@
 {% block title %}Sync - Foodinator{% endblock %}
 
 {% block content %}
-<h2>Sync to Home Assistant</h2>
-{% if ctx.ha_configured %}
+<h2>Sync</h2>
+
+<h3>Home Assistant</h3>
 <div class="card">
     <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
     14 days to your Home Assistant calendar. Once an entry is synced it
     can't be corrected here - only avoided by clearing it before it syncs.</p>
+
+    <form method="post" action="/sync/ha-save">
+        <label>HA URL
+            <input type="text" name="ha_url" value="{{ ha_url_input }}" placeholder="http://homeassistant.local:8123">
+        </label>
+        <label>HA long-lived access token
+            <input type="password" name="ha_token" placeholder="{% if ctx.ha_configured %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
+        </label>
+        <label>HA calendar entity ID
+            <input type="text" name="ha_calendar_entity_id" value="{{ ha_calendar_entity_id_input }}" placeholder="calendar.foodinator">
+        </label>
+
+        {% match ha_test_result %}
+        {% when Some with (HaTestOutcome::Success) %}
+        <p class="badge badge-active">Connection successful</p>
+        {% when Some with (HaTestOutcome::Failure(message)) %}
+        <p class="badge badge-dislike">Connection failed: {{ message }}</p>
+        {% when Some with (HaTestOutcome::NotConfigured) %}
+        <p class="badge badge-inactive">Not configured - fill in all three fields (or their env-var equivalents) to test</p>
+        {% when None %}
+        {% endmatch %}
+
+        <div class="settings-actions">
+            <button type="submit">Save</button>
+            <button type="submit" class="secondary" formaction="/sync/ha-test" formmethod="post" formnovalidate>Test connection</button>
+        </div>
+    </form>
+</div>
+
+{% if ctx.ha_configured %}
+<div class="card">
     <form method="post" action="/sync">
         <button type="submit">Sync to Home Assistant</button>
     </form>
 </div>
-{% else %}
-<div class="card">
-    <p>Home Assistant isn't configured, so there's nothing to sync. Add your
-    HA URL, token, and calendar entity ID on the <a href="/settings">Settings</a>
-    page to enable this.</p>
-</div>
 {% endif %}
+
+<h3>Google Calendar</h3>
+<div class="card">
+    <p>Google Calendar sync is coming soon.</p>
+</div>
 
 {% if let Some(results) = results %}
 <div class="card">

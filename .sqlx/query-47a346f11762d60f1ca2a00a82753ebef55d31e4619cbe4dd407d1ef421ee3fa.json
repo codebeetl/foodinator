@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO gcal_calendar_sync (meal_plan_entry_id, gcal_event_id, content_hash, synced_at, last_error) VALUES ($1, 'pending', $2, NULL, $3) ON CONFLICT (meal_plan_entry_id) DO UPDATE SET content_hash = $2, synced_at = NULL, last_error = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "47a346f11762d60f1ca2a00a82753ebef55d31e4619cbe4dd407d1ef421ee3fa"
+}

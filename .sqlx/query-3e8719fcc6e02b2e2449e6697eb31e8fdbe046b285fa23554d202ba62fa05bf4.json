@@ -1,0 +1,162 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE app_settings SET ha_url = $1, ha_token = COALESCE($2, ha_token), ha_calendar_entity_id = $3, updated_at = now() WHERE id = 1 RETURNING default_start_time, default_duration_minutes, ha_url, ha_token, ha_calendar_entity_id, gcal_client_id, gcal_client_secret, gcal_calendar_id, gcal_refresh_token, week_start_weekday, theme, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "default_start_time",
+        "type_info": "Time",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "default_start_time"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "default_duration_minutes",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "default_duration_minutes"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ha_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "ha_url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ha_token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "ha_token"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "ha_calendar_entity_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "ha_calendar_entity_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "gcal_client_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "gcal_client_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "gcal_client_secret",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "gcal_client_secret"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "gcal_calendar_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "gcal_calendar_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "gcal_refresh_token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "gcal_refresh_token"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "week_start_weekday",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "week_start_weekday"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "theme",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "theme"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "app_settings",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3e8719fcc6e02b2e2449e6697eb31e8fdbe046b285fa23554d202ba62fa05bf4"
+}
