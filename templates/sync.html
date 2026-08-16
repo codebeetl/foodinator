@@ -49,12 +49,57 @@
 
 <h3>Google Calendar</h3>
 <div class="card">
-    <p>Google Calendar sync is coming soon.</p>
+    <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
+    14 days to your Google Calendar via OAuth2.</p>
+
+    <form method="post" action="/sync/gcal/save">
+        <label>Client ID
+            <input type="text" name="gcal_client_id" value="{{ gcal_client_id_input }}" placeholder="123456789.apps.googleusercontent.com">
+        </label>
+        <label>Client Secret
+            <input type="password" name="gcal_client_secret" placeholder="{% if gcal_connected %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
+        </label>
+        <label>Calendar ID
+            <input type="text" name="gcal_calendar_id" value="{{ gcal_calendar_id_input }}" placeholder="family@group.calendar.google.com">
+        </label>
+
+        <div class="settings-actions">
+            <button type="submit">Save</button>
+        </div>
+    </form>
 </div>
+
+{% if gcal_just_connected %}
+<div class="card">
+    <p class="badge badge-active">Successfully connected to Google Calendar</p>
+</div>
+{% endif %}
+
+{% match gcal_error %}
+{% when Some with (error) %}
+<div class="card">
+    <p class="badge badge-dislike">Error: {{ error }}</p>
+</div>
+{% when None %}
+{% endmatch %}
+
+{% if gcal_connected %}
+<div class="card">
+    <p class="badge badge-active">Connected to Google Calendar</p>
+    <form method="post" action="/sync/gcal">
+        <button type="submit">Sync to Google Calendar</button>
+    </form>
+</div>
+{% else %}
+<div class="card">
+    <a href="/sync/gcal/auth" class="button">Connect to Google</a>
+    <p><small>Save your Client ID, Secret, and Calendar ID above, then click to authorize.</small></p>
+</div>
+{% endif %}
 
 {% if let Some(results) = results %}
 <div class="card">
-    <h3>Results</h3>
+    <h3>Home Assistant Results</h3>
     {% if results.synced.is_empty() && results.failed.is_empty() %}
     <p>Nothing to sync - no eligible entries in the next 14 days.</p>
     {% endif %}
@@ -72,6 +117,33 @@
     <h4>Failed</h4>
     <ul>
         {% for outcome in results.failed %}
+        <li>{{ outcome.entry_date }} - {{ outcome.meal_name }}{% if let Some(error) = outcome.error %}: {{ error }}{% endif %}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if let Some(gcal_results) = gcal_sync_result %}
+<div class="card">
+    <h3>Google Calendar Results</h3>
+    {% if gcal_results.synced.is_empty() && gcal_results.failed.is_empty() %}
+    <p>Nothing to sync - no eligible entries in the next 14 days.</p>
+    {% endif %}
+
+    {% if !gcal_results.synced.is_empty() %}
+    <h4>Synced</h4>
+    <ul>
+        {% for outcome in gcal_results.synced %}
+        <li>{{ outcome.entry_date }} - {{ outcome.meal_name }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if !gcal_results.failed.is_empty() %}
+    <h4>Failed</h4>
+    <ul>
+        {% for outcome in gcal_results.failed %}
         <li>{{ outcome.entry_date }} - {{ outcome.meal_name }}{% if let Some(error) = outcome.error %}: {{ error }}{% endif %}</li>
         {% endfor %}
     </ul>

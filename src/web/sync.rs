@@ -1,15 +1,42 @@
 use askama::Template;
-use axum::extract::{Form, State};
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::extract::{Form, Query, State};
+use axum::http::request::Parts;
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::{get, post};
 use axum::Router;
 use chrono::{Duration, NaiveDate};
 use serde::Deserialize;
 
 use crate::clock;
 use crate::db::{settings, sync as sync_db};
+use crate::gcal::{self, client::GcalClient, sync as gcal_sync};
 use crate::ha::sync as ha_sync;
 use crate::state::{AppState, PageContext};
+
+struct HostHeader(String);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for HostHeader {
+    type Rejection = Redirect;
+
+    #[allow(refining_impl_trait)]
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self, Self::Rejection>> + Send>>
+    {
+        let host = parts
+            .headers
+            .get(axum::http::header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        Box::pin(async move {
+            match host {
+                Some(h) => Ok(HostHeader(h)),
+                None => Err(Redirect::temporary("/sync?gcal_error=no_host")),
+            }
+        })
+    }
+}
 
 /// Only entries within this many days are eligible to sync - see
 /// ha::sync::is_within_sync_horizon for why (HA has no update service, so
@@ -21,6 +48,10 @@ pub fn router() -> Router<AppState> {
         .route("/sync", get(show).post(run_sync))
         .route("/sync/ha-test", get(show).post(test_ha_connection))
         .route("/sync/ha-save", get(show).post(save_ha_config))
+        .route("/sync/gcal/save", get(show).post(save_gcal_config))
+        .route("/sync/gcal/auth", get(gcal_auth))
+        .route("/sync/gcal/callback", get(gcal_callback))
+        .route("/sync/gcal", post(run_gcal_sync))
 }
 
 #[derive(Clone)]
@@ -49,6 +80,12 @@ struct SyncTemplate {
     ha_url_input: String,
     ha_calendar_entity_id_input: String,
     ha_test_result: Option<HaTestOutcome>,
+    gcal_client_id_input: String,
+    gcal_calendar_id_input: String,
+    gcal_connected: bool,
+    gcal_sync_result: Option<SyncResults>,
+    gcal_error: Option<String>,
+    gcal_just_connected: bool,
 }
 
 impl IntoResponse for SyncTemplate {
@@ -62,17 +99,33 @@ async fn build_sync_template(state: &AppState) -> SyncTemplate {
         .await
         .expect("failed to fetch settings");
     let ctx = PageContext::from_state(state, &settings);
+    let gcal_connected = settings::resolve_gcal_config(&settings).is_some();
     SyncTemplate {
         ctx,
         results: None,
         ha_url_input: settings.ha_url.unwrap_or_default(),
         ha_calendar_entity_id_input: settings.ha_calendar_entity_id.unwrap_or_default(),
         ha_test_result: None,
+        gcal_client_id_input: settings.gcal_client_id.unwrap_or_default(),
+        gcal_calendar_id_input: settings.gcal_calendar_id.unwrap_or_default(),
+        gcal_connected,
+        gcal_sync_result: None,
+        gcal_error: None,
+        gcal_just_connected: false,
     }
 }
 
-async fn show(State(state): State<AppState>) -> SyncTemplate {
-    build_sync_template(&state).await
+#[derive(Deserialize)]
+struct SyncShowParams {
+    gcal_error: Option<String>,
+    gcal_connected: Option<String>,
+}
+
+async fn show(State(state): State<AppState>, Query(params): Query<SyncShowParams>) -> SyncTemplate {
+    let mut template = build_sync_template(&state).await;
+    template.gcal_error = params.gcal_error;
+    template.gcal_just_connected = params.gcal_connected.as_deref() == Some("true");
+    template
 }
 
 async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
@@ -141,12 +194,19 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
         }
     }
 
+    let gcal_connected = settings::resolve_gcal_config(&app_settings).is_some();
     SyncTemplate {
         ctx: PageContext::from_state(&state, &app_settings),
         results: Some(SyncResults { synced, failed }),
         ha_url_input: app_settings.ha_url.unwrap_or_default(),
         ha_calendar_entity_id_input: app_settings.ha_calendar_entity_id.unwrap_or_default(),
         ha_test_result: None,
+        gcal_client_id_input: app_settings.gcal_client_id.unwrap_or_default(),
+        gcal_calendar_id_input: app_settings.gcal_calendar_id.unwrap_or_default(),
+        gcal_connected,
+        gcal_sync_result: None,
+        gcal_error: None,
+        gcal_just_connected: false,
     }
 }
 
@@ -174,6 +234,103 @@ async fn save_ha_config(
     template.ha_url_input = form.ha_url;
     template.ha_calendar_entity_id_input = form.ha_calendar_entity_id;
     template
+}
+
+#[derive(Deserialize)]
+struct GcalConfigForm {
+    gcal_client_id: String,
+    gcal_client_secret: String,
+    gcal_calendar_id: String,
+}
+
+async fn save_gcal_config(
+    State(state): State<AppState>,
+    Form(form): Form<GcalConfigForm>,
+) -> SyncTemplate {
+    settings::update_gcal(
+        &state.pool,
+        super::non_empty(&form.gcal_client_id),
+        super::non_empty(&form.gcal_client_secret),
+        super::non_empty(&form.gcal_calendar_id),
+    )
+    .await
+    .expect("failed to update GCal settings");
+
+    let mut template = build_sync_template(&state).await;
+    template.gcal_client_id_input = form.gcal_client_id;
+    template.gcal_calendar_id_input = form.gcal_calendar_id;
+    template
+}
+
+fn build_redirect_uri(host: &str) -> String {
+    format!("https://{host}/sync/gcal/callback")
+}
+
+async fn gcal_auth(State(state): State<AppState>, HostHeader(host): HostHeader) -> Redirect {
+    let settings = settings::get(&state.pool)
+        .await
+        .expect("failed to fetch settings");
+
+    let Some(client_id) = settings.gcal_client_id.as_deref() else {
+        return Redirect::temporary("/sync?gcal_error=not_configured");
+    };
+    if client_id.is_empty() {
+        return Redirect::temporary("/sync?gcal_error=not_configured");
+    }
+
+    let redirect_uri = build_redirect_uri(&host);
+    let auth_url = gcal::build_auth_url(client_id, &redirect_uri);
+
+    Redirect::temporary(&auth_url)
+}
+
+#[derive(Deserialize)]
+pub struct GcalCallbackParams {
+    code: Option<String>,
+    error: Option<String>,
+}
+
+async fn gcal_callback(
+    State(state): State<AppState>,
+    HostHeader(host): HostHeader,
+    Query(params): Query<GcalCallbackParams>,
+) -> Redirect {
+    if let Some(error) = &params.error {
+        return Redirect::temporary(&format!("/sync?gcal_error={error}"));
+    }
+
+    let Some(code) = &params.code else {
+        return Redirect::temporary("/sync?gcal_error=no_code");
+    };
+
+    let settings = settings::get(&state.pool)
+        .await
+        .expect("failed to fetch settings");
+
+    let Some(gcal_config) = settings::resolve_gcal_config(&settings) else {
+        return Redirect::temporary("/sync?gcal_error=not_configured");
+    };
+
+    let redirect_uri = build_redirect_uri(&host);
+
+    match gcal::exchange_code(
+        &gcal_config.client_id,
+        &gcal_config.client_secret,
+        code,
+        &redirect_uri,
+    )
+    .await
+    {
+        Ok(tokens) => {
+            if let Some(refresh_token) = &tokens.refresh_token {
+                settings::set_gcal_refresh_token(&state.pool, refresh_token)
+                    .await
+                    .expect("failed to store refresh token");
+            }
+            Redirect::temporary("/sync?gcal_connected=true")
+        }
+        Err(err) => Redirect::temporary(&format!("/sync?gcal_error={err}")),
+    }
 }
 
 /// Resolves what a connection test should actually try: the typed field if
@@ -231,6 +388,111 @@ async fn test_ha_connection(
     template.ha_url_input = form.ha_url;
     template.ha_calendar_entity_id_input = form.ha_calendar_entity_id;
     template.ha_test_result = ha_test_result;
+    template
+}
+
+async fn run_gcal_sync(State(state): State<AppState>) -> SyncTemplate {
+    let app_settings = settings::get(&state.pool)
+        .await
+        .expect("failed to fetch settings");
+
+    let gcal_config = match settings::resolve_gcal_config(&app_settings) {
+        Some(c) => c,
+        None => {
+            let mut template = build_sync_template(&state).await;
+            template.gcal_error = Some("Google Calendar not configured".into());
+            return template;
+        }
+    };
+
+    let refresh_token = &gcal_config.refresh_token;
+    let access_token = match gcal::refresh_access_token(
+        &gcal_config.client_id,
+        &gcal_config.client_secret,
+        refresh_token,
+    )
+    .await
+    {
+        Ok(token) => token,
+        Err(err) => {
+            let mut template = build_sync_template(&state).await;
+            template.gcal_error = Some(format!("Token refresh failed: {err}"));
+            return template;
+        }
+    };
+
+    let client = GcalClient::new(access_token, gcal_config.calendar_id.clone());
+
+    let today = clock::today(&state.household_tz);
+    let candidates = sync_db::gcal_list_syncable(&state.pool, today, SYNC_HORIZON_DAYS)
+        .await
+        .expect("failed to list GCal syncable entries");
+
+    let mut synced = Vec::new();
+    let mut failed = Vec::new();
+
+    for candidate in candidates {
+        let start_time = candidate.effective_start_time(app_settings.default_start_time);
+        let duration_minutes =
+            candidate.effective_duration_minutes(app_settings.default_duration_minutes);
+
+        let start_utc =
+            clock::household_datetime_utc(&state.household_tz, candidate.entry_date, start_time);
+        let end_utc = start_utc + Duration::minutes(duration_minutes as i64);
+
+        let description = gcal_sync::build_description(
+            &candidate.attendee_names,
+            candidate.notes.as_deref(),
+            candidate.meal_plan_entry_id,
+        );
+        let hash = gcal_sync::content_hash(
+            &candidate.meal_name,
+            &description,
+            &start_utc.to_rfc3339(),
+            &end_utc.to_rfc3339(),
+        );
+
+        let outcome = client
+            .create_event(&candidate.meal_name, &description, start_utc, end_utc)
+            .await;
+
+        match outcome {
+            Ok(event) => {
+                sync_db::gcal_record_synced(
+                    &state.pool,
+                    candidate.meal_plan_entry_id,
+                    &event.id,
+                    &hash,
+                )
+                .await
+                .expect("failed to record GCal sync");
+                synced.push(SyncOutcome {
+                    entry_date: candidate.entry_date,
+                    meal_name: candidate.meal_name,
+                    error: None,
+                });
+            }
+            Err(err) => {
+                let message = err.to_string();
+                sync_db::gcal_record_failed(
+                    &state.pool,
+                    candidate.meal_plan_entry_id,
+                    &hash,
+                    &message,
+                )
+                .await
+                .expect("failed to record GCal sync failure");
+                failed.push(SyncOutcome {
+                    entry_date: candidate.entry_date,
+                    meal_name: candidate.meal_name,
+                    error: Some(message),
+                });
+            }
+        }
+    }
+
+    let mut template = build_sync_template(&state).await;
+    template.gcal_sync_result = Some(SyncResults { synced, failed });
     template
 }
 
@@ -423,6 +685,137 @@ mod tests {
         assert_eq!(
             settings.ha_calendar_entity_id.as_deref(),
             Some("calendar.foodinator")
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn saving_gcal_config_persists_to_db(pool: PgPool) -> sqlx::Result<()> {
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post("/sync/gcal/save")
+                    .header(
+                        axum::http::header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded",
+                    )
+                    .body(Body::from(
+                        "gcal_client_id=my-client-id&gcal_client_secret=my-secret&gcal_calendar_id=cal%40group.calendar.google.com",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let settings = settings::get(&pool).await?;
+        assert_eq!(settings.gcal_client_id.as_deref(), Some("my-client-id"));
+        assert_eq!(settings.gcal_client_secret.as_deref(), Some("my-secret"));
+        assert_eq!(
+            settings.gcal_calendar_id.as_deref(),
+            Some("cal@group.calendar.google.com")
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn show_renders_gcal_section(pool: PgPool) -> sqlx::Result<()> {
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(Request::get("/sync").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("Google Calendar"),
+            "should show GCal section: {html}"
+        );
+        assert!(
+            html.contains("gcal_client_id"),
+            "should contain GCal Client ID input: {html}"
+        );
+        assert!(
+            html.contains("/sync/gcal/auth"),
+            "should contain Connect to Google link: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn gcal_auth_redirects_to_google_when_configured(pool: PgPool) -> sqlx::Result<()> {
+        settings::update_gcal(
+            &pool,
+            Some("my-client-id"),
+            Some("my-secret"),
+            Some("cal@group.calendar.google.com"),
+        )
+        .await?;
+
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(
+                Request::get("/sync/gcal/auth")
+                    .header(axum::http::header::HOST, "foodinator.example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+
+        let location = response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            location.contains("accounts.google.com"),
+            "should redirect to Google: {location}"
+        );
+        assert!(
+            location.contains("client_id=my-client-id"),
+            "should include client_id: {location}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn gcal_auth_redirects_with_error_when_not_configured(pool: PgPool) -> sqlx::Result<()> {
+        let app = router().with_state(crate::state::test_app_state(pool));
+
+        let response = app
+            .oneshot(
+                Request::get("/sync/gcal/auth")
+                    .header(axum::http::header::HOST, "foodinator.example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+
+        let location = response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(
+            location.contains("gcal_error=not_configured"),
+            "should redirect with error: {location}"
         );
 
         Ok(())
