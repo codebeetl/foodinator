@@ -39,13 +39,16 @@
     </form>
 </div>
 
-{% if ctx.ha_configured %}
 <div class="card">
     <form method="post" action="/sync">
+        {% if ctx.ha_configured %}
         <button type="submit">Sync to Home Assistant</button>
+        {% else %}
+        <button type="submit" disabled>Sync to Home Assistant</button>
+        <p><small>Fill in and save all HA fields above to enable syncing.</small></p>
+        {% endif %}
     </form>
 </div>
-{% endif %}
 
 <h3>Google Calendar</h3>
 <div class="card">
@@ -92,8 +95,12 @@
 </div>
 {% else %}
 <div class="card">
+    {% if gcal_fields_filled %}
     <a href="/sync/gcal/auth" class="button">Connect to Google</a>
-    <p><small>Save your Client ID, Secret, and Calendar ID above, then click to authorize.</small></p>
+    {% else %}
+    <a class="button disabled" aria-disabled="true">Connect to Google</a>
+    <p><small>Fill in and save all Google Calendar fields above to enable connecting.</small></p>
+    {% endif %}
 </div>
 {% endif %}
 

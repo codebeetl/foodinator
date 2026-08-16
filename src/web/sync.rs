@@ -83,6 +83,7 @@ struct SyncTemplate {
     gcal_client_id_input: String,
     gcal_calendar_id_input: String,
     gcal_connected: bool,
+    gcal_fields_filled: bool,
     gcal_sync_result: Option<SyncResults>,
     gcal_error: Option<String>,
     gcal_just_connected: bool,
@@ -100,6 +101,13 @@ async fn build_sync_template(state: &AppState) -> SyncTemplate {
         .expect("failed to fetch settings");
     let ctx = PageContext::from_state(state, &settings);
     let gcal_connected = settings::resolve_gcal_config(&settings).is_some();
+    let gcal_fields_filled = !settings.gcal_client_id.as_deref().unwrap_or("").is_empty()
+        && !settings
+            .gcal_calendar_id
+            .as_deref()
+            .unwrap_or("")
+            .is_empty()
+        && settings.gcal_client_secret.is_some();
     SyncTemplate {
         ctx,
         results: None,
@@ -109,6 +117,7 @@ async fn build_sync_template(state: &AppState) -> SyncTemplate {
         gcal_client_id_input: settings.gcal_client_id.unwrap_or_default(),
         gcal_calendar_id_input: settings.gcal_calendar_id.unwrap_or_default(),
         gcal_connected,
+        gcal_fields_filled,
         gcal_sync_result: None,
         gcal_error: None,
         gcal_just_connected: false,
@@ -195,6 +204,17 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
     }
 
     let gcal_connected = settings::resolve_gcal_config(&app_settings).is_some();
+    let gcal_fields_filled = !app_settings
+        .gcal_client_id
+        .as_deref()
+        .unwrap_or("")
+        .is_empty()
+        && !app_settings
+            .gcal_calendar_id
+            .as_deref()
+            .unwrap_or("")
+            .is_empty()
+        && app_settings.gcal_client_secret.is_some();
     SyncTemplate {
         ctx: PageContext::from_state(&state, &app_settings),
         results: Some(SyncResults { synced, failed }),
@@ -204,6 +224,7 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
         gcal_client_id_input: app_settings.gcal_client_id.unwrap_or_default(),
         gcal_calendar_id_input: app_settings.gcal_calendar_id.unwrap_or_default(),
         gcal_connected,
+        gcal_fields_filled,
         gcal_sync_result: None,
         gcal_error: None,
         gcal_just_connected: false,
@@ -619,6 +640,39 @@ mod tests {
             html.contains("ha_url"),
             "should contain HA URL input: {html}"
         );
+        // HA is configured in test_app_state — sync button should be enabled
+        assert!(
+            !html.contains("disabled") || !html.contains("Sync to Home Assistant\" disabled"),
+            "sync button should be enabled when HA is configured: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn ha_sync_button_is_disabled_when_not_configured(pool: PgPool) -> sqlx::Result<()> {
+        let mut state = crate::state::test_app_state(pool);
+        state.ha_env_url = None;
+        state.ha_env_token = None;
+        state.ha_env_calendar_entity_id = None;
+        let app = router().with_state(state);
+
+        let response = app
+            .oneshot(Request::get("/sync").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("disabled>Sync to Home Assistant"),
+            "sync button should be disabled when HA is not configured: {html}"
+        );
+        assert!(
+            html.contains("Fill in and save all HA fields"),
+            "should show hint when HA is not configured: {html}"
+        );
 
         Ok(())
     }
@@ -723,7 +777,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn show_renders_gcal_section(pool: PgPool) -> sqlx::Result<()> {
-        let app = router().with_state(crate::state::test_app_state(pool));
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
 
         let response = app
             .oneshot(Request::get("/sync").body(Body::empty()).unwrap())
@@ -742,6 +796,38 @@ mod tests {
         assert!(
             html.contains("gcal_client_id"),
             "should contain GCal Client ID input: {html}"
+        );
+        // No GCal credentials saved yet — connect button should be disabled
+        assert!(
+            html.contains("aria-disabled=\"true\""),
+            "connect button should be disabled when fields are blank: {html}"
+        );
+        assert!(
+            html.contains("Fill in and save all Google Calendar fields"),
+            "should show hint when fields are blank: {html}"
+        );
+
+        // Save GCal credentials, then verify connect button is enabled
+        settings::update_gcal(
+            &pool,
+            Some("my-client-id"),
+            Some("my-secret"),
+            Some("cal@group.calendar.google.com"),
+        )
+        .await?;
+
+        let app = router().with_state(crate::state::test_app_state(pool));
+        let response = app
+            .oneshot(Request::get("/sync").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            !html.contains("aria-disabled=\"true\""),
+            "connect button should be enabled after saving credentials: {html}"
         );
         assert!(
             html.contains("/sync/gcal/auth"),
