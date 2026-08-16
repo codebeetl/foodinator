@@ -51,6 +51,8 @@ pub fn router() -> Router<AppState> {
         .route("/sync/gcal/save", get(show).post(save_gcal_config))
         .route("/sync/gcal/auth", get(gcal_auth))
         .route("/sync/gcal/callback", get(gcal_callback))
+        .route("/sync/gcal/calendars", get(gcal_calendars))
+        .route("/sync/gcal/calendar", post(gcal_save_calendar))
         .route("/sync/gcal", post(run_gcal_sync))
 }
 
@@ -81,12 +83,13 @@ struct SyncTemplate {
     ha_calendar_entity_id_input: String,
     ha_test_result: Option<HaTestOutcome>,
     gcal_client_id_input: String,
-    gcal_calendar_id_input: String,
     gcal_connected: bool,
     gcal_fields_filled: bool,
     gcal_sync_result: Option<SyncResults>,
     gcal_error: Option<String>,
     gcal_just_connected: bool,
+    gcal_calendars: Vec<gcal::GcalCalendarEntry>,
+    gcal_show_picker: bool,
 }
 
 impl IntoResponse for SyncTemplate {
@@ -100,14 +103,24 @@ async fn build_sync_template(state: &AppState) -> SyncTemplate {
         .await
         .expect("failed to fetch settings");
     let ctx = PageContext::from_state(state, &settings);
-    let gcal_connected = settings::resolve_gcal_config(&settings).is_some();
-    let gcal_fields_filled = !settings.gcal_client_id.as_deref().unwrap_or("").is_empty()
-        && !settings
-            .gcal_calendar_id
-            .as_deref()
-            .unwrap_or("")
-            .is_empty()
-        && settings.gcal_client_secret.is_some();
+    let gcal_connected = settings::resolve_gcal_config(
+        &settings,
+        state.gcal_env_client_id.as_deref(),
+        state.gcal_env_client_secret.as_deref(),
+    )
+    .is_some();
+    // "fields filled" means we have a usable client_id + client_secret
+    // from either DB overrides or env-var fallbacks — enough to start OAuth.
+    let effective_client_id = settings
+        .gcal_client_id
+        .as_deref()
+        .or(state.gcal_env_client_id.as_deref());
+    let effective_client_secret = settings
+        .gcal_client_secret
+        .as_deref()
+        .or(state.gcal_env_client_secret.as_deref());
+    let gcal_fields_filled = effective_client_id.is_some_and(|v| !v.is_empty())
+        && effective_client_secret.is_some_and(|v| !v.is_empty());
     SyncTemplate {
         ctx,
         results: None,
@@ -115,12 +128,13 @@ async fn build_sync_template(state: &AppState) -> SyncTemplate {
         ha_calendar_entity_id_input: settings.ha_calendar_entity_id.unwrap_or_default(),
         ha_test_result: None,
         gcal_client_id_input: settings.gcal_client_id.unwrap_or_default(),
-        gcal_calendar_id_input: settings.gcal_calendar_id.unwrap_or_default(),
         gcal_connected,
         gcal_fields_filled,
         gcal_sync_result: None,
         gcal_error: None,
         gcal_just_connected: false,
+        gcal_calendars: Vec::new(),
+        gcal_show_picker: false,
     }
 }
 
@@ -203,18 +217,22 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
         }
     }
 
-    let gcal_connected = settings::resolve_gcal_config(&app_settings).is_some();
-    let gcal_fields_filled = !app_settings
+    let gcal_connected = settings::resolve_gcal_config(
+        &app_settings,
+        state.gcal_env_client_id.as_deref(),
+        state.gcal_env_client_secret.as_deref(),
+    )
+    .is_some();
+    let effective_client_id = app_settings
         .gcal_client_id
         .as_deref()
-        .unwrap_or("")
-        .is_empty()
-        && !app_settings
-            .gcal_calendar_id
-            .as_deref()
-            .unwrap_or("")
-            .is_empty()
-        && app_settings.gcal_client_secret.is_some();
+        .or(state.gcal_env_client_id.as_deref());
+    let effective_client_secret = app_settings
+        .gcal_client_secret
+        .as_deref()
+        .or(state.gcal_env_client_secret.as_deref());
+    let gcal_fields_filled = effective_client_id.is_some_and(|v| !v.is_empty())
+        && effective_client_secret.is_some_and(|v| !v.is_empty());
     SyncTemplate {
         ctx: PageContext::from_state(&state, &app_settings),
         results: Some(SyncResults { synced, failed }),
@@ -222,12 +240,13 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
         ha_calendar_entity_id_input: app_settings.ha_calendar_entity_id.unwrap_or_default(),
         ha_test_result: None,
         gcal_client_id_input: app_settings.gcal_client_id.unwrap_or_default(),
-        gcal_calendar_id_input: app_settings.gcal_calendar_id.unwrap_or_default(),
         gcal_connected,
         gcal_fields_filled,
         gcal_sync_result: None,
         gcal_error: None,
         gcal_just_connected: false,
+        gcal_calendars: Vec::new(),
+        gcal_show_picker: false,
     }
 }
 
@@ -261,7 +280,6 @@ async fn save_ha_config(
 struct GcalConfigForm {
     gcal_client_id: String,
     gcal_client_secret: String,
-    gcal_calendar_id: String,
 }
 
 async fn save_gcal_config(
@@ -272,14 +290,13 @@ async fn save_gcal_config(
         &state.pool,
         super::non_empty(&form.gcal_client_id),
         super::non_empty(&form.gcal_client_secret),
-        super::non_empty(&form.gcal_calendar_id),
+        None,
     )
     .await
     .expect("failed to update GCal settings");
 
     let mut template = build_sync_template(&state).await;
     template.gcal_client_id_input = form.gcal_client_id;
-    template.gcal_calendar_id_input = form.gcal_calendar_id;
     template
 }
 
@@ -328,7 +345,11 @@ async fn gcal_callback(
         .await
         .expect("failed to fetch settings");
 
-    let Some(gcal_config) = settings::resolve_gcal_config(&settings) else {
+    let Some(gcal_config) = settings::resolve_gcal_config(
+        &settings,
+        state.gcal_env_client_id.as_deref(),
+        state.gcal_env_client_secret.as_deref(),
+    ) else {
         return Redirect::temporary("/sync?gcal_error=not_configured");
     };
 
@@ -348,7 +369,10 @@ async fn gcal_callback(
                     .await
                     .expect("failed to store refresh token");
             }
-            Redirect::temporary("/sync?gcal_connected=true")
+            // Redirect to the calendar picker with the access token so the
+            // user can select which calendar to sync to.
+            let picker_url = format!("/sync/gcal/calendars?token={}", tokens.access_token);
+            Redirect::temporary(&picker_url)
         }
         Err(err) => Redirect::temporary(&format!("/sync?gcal_error={err}")),
     }
@@ -417,7 +441,11 @@ async fn run_gcal_sync(State(state): State<AppState>) -> SyncTemplate {
         .await
         .expect("failed to fetch settings");
 
-    let gcal_config = match settings::resolve_gcal_config(&app_settings) {
+    let gcal_config = match settings::resolve_gcal_config(
+        &app_settings,
+        state.gcal_env_client_id.as_deref(),
+        state.gcal_env_client_secret.as_deref(),
+    ) {
         Some(c) => c,
         None => {
             let mut template = build_sync_template(&state).await;
@@ -515,6 +543,75 @@ async fn run_gcal_sync(State(state): State<AppState>) -> SyncTemplate {
     let mut template = build_sync_template(&state).await;
     template.gcal_sync_result = Some(SyncResults { synced, failed });
     template
+}
+
+#[derive(Deserialize)]
+struct CalendarsQuery {
+    token: Option<String>,
+}
+
+async fn gcal_calendars(
+    State(state): State<AppState>,
+    query: Query<CalendarsQuery>,
+) -> Result<SyncTemplate, Redirect> {
+    let Some(access_token) = &query.token else {
+        return Err(Redirect::temporary("/sync?gcal_error=missing_token"));
+    };
+
+    let settings = settings::get(&state.pool)
+        .await
+        .expect("failed to fetch settings");
+
+    let gcal_config = match settings::resolve_gcal_config(
+        &settings,
+        state.gcal_env_client_id.as_deref(),
+        state.gcal_env_client_secret.as_deref(),
+    ) {
+        Some(c) => c,
+        None => {
+            return Err(Redirect::temporary("/sync?gcal_error=not_configured"));
+        }
+    };
+
+    // If the stored calendar_id is empty, default to "primary" so the UI
+    // can pre-select something sensible when the user has already chosen
+    // a calendar.
+    let gcal_fields_filled = !gcal_config.client_id.is_empty()
+        && !gcal_config.calendar_id.is_empty()
+        && gcal_config.refresh_token.is_empty();
+
+    let client =
+        crate::gcal::client::GcalClient::new(access_token.clone(), gcal_config.calendar_id.clone());
+
+    let calendars = match client.list_calendars().await {
+        Ok(cals) => cals,
+        Err(err) => {
+            let mut tmpl = build_sync_template(&state).await;
+            tmpl.gcal_error = Some(format!("Failed to list calendars: {err}"));
+            return Ok(tmpl);
+        }
+    };
+
+    let mut tmpl = build_sync_template(&state).await;
+    tmpl.gcal_calendars = calendars;
+    tmpl.gcal_show_picker = true;
+    tmpl.gcal_fields_filled = gcal_fields_filled;
+    Ok(tmpl)
+}
+
+#[derive(Deserialize)]
+struct CalendarSelectForm {
+    calendar_id: String,
+}
+
+async fn gcal_save_calendar(
+    State(state): State<AppState>,
+    Form(form): Form<CalendarSelectForm>,
+) -> Redirect {
+    settings::update_gcal(&state.pool, None, None, Some(&form.calendar_id))
+        .await
+        .expect("failed to save calendar selection");
+    Redirect::temporary("/sync?gcal_connected=true")
 }
 
 #[cfg(test)]
@@ -670,7 +767,7 @@ mod tests {
             "sync button should be disabled when HA is not configured: {html}"
         );
         assert!(
-            html.contains("Fill in and save all HA fields"),
+            html.contains("Fill in and save all fields above"),
             "should show hint when HA is not configured: {html}"
         );
 
@@ -756,7 +853,7 @@ mod tests {
                         "application/x-www-form-urlencoded",
                     )
                     .body(Body::from(
-                        "gcal_client_id=my-client-id&gcal_client_secret=my-secret&gcal_calendar_id=cal%40group.calendar.google.com",
+                        "gcal_client_id=my-client-id&gcal_client_secret=my-secret",
                     ))
                     .unwrap(),
             )
@@ -767,17 +864,17 @@ mod tests {
         let settings = settings::get(&pool).await?;
         assert_eq!(settings.gcal_client_id.as_deref(), Some("my-client-id"));
         assert_eq!(settings.gcal_client_secret.as_deref(), Some("my-secret"));
-        assert_eq!(
-            settings.gcal_calendar_id.as_deref(),
-            Some("cal@group.calendar.google.com")
-        );
 
         Ok(())
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn show_renders_gcal_section(pool: PgPool) -> sqlx::Result<()> {
-        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+        // No GCal env vars set and no DB credentials → button should be disabled.
+        let mut state = crate::state::test_app_state(pool.clone());
+        state.gcal_env_client_id = None;
+        state.gcal_env_client_secret = None;
+        let app = router().with_state(state);
 
         let response = app
             .oneshot(Request::get("/sync").body(Body::empty()).unwrap())
@@ -803,20 +900,17 @@ mod tests {
             "connect button should be disabled when fields are blank: {html}"
         );
         assert!(
-            html.contains("Fill in and save all Google Calendar fields"),
+            html.contains("Fill in and save Client ID and Secret"),
             "should show hint when fields are blank: {html}"
         );
 
         // Save GCal credentials, then verify connect button is enabled
-        settings::update_gcal(
-            &pool,
-            Some("my-client-id"),
-            Some("my-secret"),
-            Some("cal@group.calendar.google.com"),
-        )
-        .await?;
+        settings::update_gcal(&pool, Some("my-client-id"), Some("my-secret"), None).await?;
 
-        let app = router().with_state(crate::state::test_app_state(pool));
+        let mut state = crate::state::test_app_state(pool);
+        state.gcal_env_client_id = None;
+        state.gcal_env_client_secret = None;
+        let app = router().with_state(state);
         let response = app
             .oneshot(Request::get("/sync").body(Body::empty()).unwrap())
             .await

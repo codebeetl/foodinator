@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::GcalError;
+use super::{GcalCalendarEntry, GcalError};
 
 /// A created or updated Google Calendar event.
 #[derive(Debug, Clone, Deserialize)]
@@ -47,6 +47,68 @@ impl GcalClient {
         self.access_token = token;
     }
 
+    /// Lists all calendars the authenticated user has access to.
+    pub async fn list_calendars(&self) -> Result<Vec<GcalCalendarEntry>, GcalError> {
+        let url = "https://www.googleapis.com/calendar/v3/users/me/calendarList";
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(&self.access_token)
+            .send()
+            .await
+            .map_err(|e| GcalError::Http(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable>".to_string());
+            return Err(GcalError::Api {
+                status: status.as_u16(),
+                message: body,
+            });
+        }
+
+        #[derive(Deserialize)]
+        struct CalendarListResponse {
+            items: Vec<CalendarListEntry>,
+        }
+
+        #[derive(Deserialize)]
+        struct CalendarListEntry {
+            id: String,
+            summary: String,
+            #[serde(rename = "primary", default)]
+            is_primary: bool,
+            #[serde(rename = "accessRole", default)]
+            access_role: Option<String>,
+        }
+
+        let list: CalendarListResponse = response
+            .json()
+            .await
+            .map_err(|e| GcalError::Http(e.to_string()))?;
+
+        let mut calendars: Vec<GcalCalendarEntry> = list
+            .items
+            .into_iter()
+            .filter(|c| matches!(c.access_role.as_deref(), Some("owner") | Some("writer")))
+            .map(|c| GcalCalendarEntry {
+                id: c.id,
+                summary: c.summary,
+                is_primary: c.is_primary,
+            })
+            .collect();
+
+        calendars.sort_by(|a, b| {
+            b.is_primary
+                .cmp(&a.is_primary)
+                .then(a.summary.cmp(&b.summary))
+        });
+        Ok(calendars)
+    }
+
     /// Create a new event on the calendar. Returns Google's event ID.
     pub async fn create_event(
         &self,
@@ -78,19 +140,22 @@ impl GcalClient {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| GcalError::Api(e.to_string()))?;
+            .map_err(|e| GcalError::Http(e.to_string()))?;
 
         let status = resp.status();
         if !status.is_success() {
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
             let message = body["error"]["message"].as_str().unwrap_or("unknown error");
-            return Err(GcalError::Api(format!("{status}: {message}")));
+            return Err(GcalError::Api {
+                status: status.as_u16(),
+                message: message.to_string(),
+            });
         }
 
         let event: GcalEvent = resp
             .json()
             .await
-            .map_err(|e| GcalError::Api(e.to_string()))?;
+            .map_err(|e| GcalError::Http(e.to_string()))?;
         Ok(event)
     }
 
@@ -127,19 +192,22 @@ impl GcalClient {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| GcalError::Api(e.to_string()))?;
+            .map_err(|e| GcalError::Http(e.to_string()))?;
 
         let status = resp.status();
         if !status.is_success() {
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
             let message = body["error"]["message"].as_str().unwrap_or("unknown error");
-            return Err(GcalError::Api(format!("{status}: {message}")));
+            return Err(GcalError::Api {
+                status: status.as_u16(),
+                message: message.to_string(),
+            });
         }
 
         let event: GcalEvent = resp
             .json()
             .await
-            .map_err(|e| GcalError::Api(e.to_string()))?;
+            .map_err(|e| GcalError::Http(e.to_string()))?;
         Ok(event)
     }
 
@@ -157,13 +225,16 @@ impl GcalClient {
             .bearer_auth(&self.access_token)
             .send()
             .await
-            .map_err(|e| GcalError::Api(e.to_string()))?;
+            .map_err(|e| GcalError::Http(e.to_string()))?;
 
         let status = resp.status();
         if !status.is_success() && status.as_u16() != 404 {
             let body: serde_json::Value = resp.json().await.unwrap_or_default();
             let message = body["error"]["message"].as_str().unwrap_or("unknown error");
-            return Err(GcalError::Api(format!("{status}: {message}")));
+            return Err(GcalError::Api {
+                status: status.as_u16(),
+                message: message.to_string(),
+            });
         }
 
         Ok(())
@@ -275,7 +346,10 @@ pub mod test_support {
             _end: DateTime<Utc>,
         ) -> Result<String, GcalError> {
             self.called.store(true, Ordering::SeqCst);
-            Err(GcalError::Api("simulated failure".into()))
+            Err(GcalError::Api {
+                status: 500,
+                message: "simulated failure".to_string(),
+            })
         }
 
         async fn update_event(
@@ -287,12 +361,18 @@ pub mod test_support {
             _end: DateTime<Utc>,
         ) -> Result<(), GcalError> {
             self.called.store(true, Ordering::SeqCst);
-            Err(GcalError::Api("simulated failure".into()))
+            Err(GcalError::Api {
+                status: 500,
+                message: "simulated failure".to_string(),
+            })
         }
 
         async fn delete_event(&self, _event_id: &str) -> Result<(), GcalError> {
             self.called.store(true, Ordering::SeqCst);
-            Err(GcalError::Api("simulated failure".into()))
+            Err(GcalError::Api {
+                status: 500,
+                message: "simulated failure".to_string(),
+            })
         }
     }
 }

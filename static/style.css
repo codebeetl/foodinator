@@ -659,6 +659,95 @@ button:disabled, .button.disabled {
     border-radius: var(--radius);
 }
 
+.sync-section {
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+}
+
+.sync-section[open] {
+    box-shadow: var(--shadow-md);
+}
+
+.sync-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-3);
+    cursor: pointer;
+    list-style: none;
+}
+
+.sync-header::-webkit-details-marker {
+    display: none;
+}
+
+.sync-header::before {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 5px solid var(--color-text-muted);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    margin-right: var(--space-2);
+    transition: transform var(--transition-fast);
+}
+
+.sync-section[open] > .sync-header::before {
+    transform: rotate(90deg);
+}
+
+.sync-header h3 {
+    margin: 0;
+    flex: 1;
+}
+
+.sync-header .button,
+.sync-header button {
+    flex-shrink: 0;
+}
+
+.sync-hint {
+    padding: 0 var(--space-3) var(--space-3);
+    margin: 0;
+}
+
+.calendar-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-3);
+}
+
+.calendar-picker-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.calendar-picker-item:hover {
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.calendar-picker-item input[type="radio"] {
+    margin: 0;
+    accent-color: var(--color-accent);
+}
+
+.calendar-picker-badge {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
 .add-meal-form {
     position: relative;
 }

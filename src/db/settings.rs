@@ -72,15 +72,33 @@ pub fn resolve_ha_config(
     })
 }
 
-/// Resolves GCal config from DB fields only (no env-var fallbacks).
-/// GCal is considered configured only when client_id, client_secret,
-/// calendar_id, and refresh_token are all present.
-pub fn resolve_gcal_config(settings: &AppSettings) -> Option<GcalConfig> {
+/// Resolves GCal config by merging per-field DB overrides over env-var
+/// fallbacks. GCal is considered configured only when client_id,
+/// client_secret, and refresh_token are all present. calendar_id always
+/// defaults to "primary" (set via the UI picker after OAuth consent).
+pub fn resolve_gcal_config(
+    settings: &AppSettings,
+    env_client_id: Option<&str>,
+    env_client_secret: Option<&str>,
+) -> Option<GcalConfig> {
+    let client_id = settings
+        .gcal_client_id
+        .clone()
+        .or_else(|| env_client_id.map(str::to_string))?;
+    let client_secret = settings
+        .gcal_client_secret
+        .clone()
+        .or_else(|| env_client_secret.map(str::to_string))?;
+    let refresh_token = settings.gcal_refresh_token.clone()?;
+    let calendar_id = settings
+        .gcal_calendar_id
+        .clone()
+        .unwrap_or_else(|| "primary".to_string());
     Some(GcalConfig {
-        client_id: settings.gcal_client_id.clone()?,
-        client_secret: settings.gcal_client_secret.clone()?,
-        calendar_id: settings.gcal_calendar_id.clone()?,
-        refresh_token: settings.gcal_refresh_token.clone()?,
+        client_id,
+        client_secret,
+        calendar_id,
+        refresh_token,
     })
 }
 
@@ -400,24 +418,30 @@ mod tests {
             updated_at: Utc::now(),
         };
 
-        assert_eq!(resolve_gcal_config(&base), None);
+        assert_eq!(resolve_gcal_config(&base, None, None), None);
 
+        // Missing refresh_token
         let partial = AppSettings {
             gcal_client_id: Some("client-id".to_string()),
             gcal_client_secret: Some("client-secret".to_string()),
             ..base.clone()
         };
-        assert_eq!(resolve_gcal_config(&partial), None, "missing calendar_id");
+        assert_eq!(
+            resolve_gcal_config(&partial, None, None),
+            None,
+            "missing refresh_token"
+        );
 
+        // Full config from DB
         let full = AppSettings {
             gcal_client_id: Some("client-id".to_string()),
             gcal_client_secret: Some("client-secret".to_string()),
             gcal_calendar_id: Some("family@group.calendar.google.com".to_string()),
             gcal_refresh_token: Some("refresh-token".to_string()),
-            ..base
+            ..base.clone()
         };
         assert_eq!(
-            resolve_gcal_config(&full),
+            resolve_gcal_config(&full, None, None),
             Some(GcalConfig {
                 client_id: "client-id".to_string(),
                 client_secret: "client-secret".to_string(),
@@ -425,6 +449,35 @@ mod tests {
                 refresh_token: "refresh-token".to_string(),
             })
         );
+
+        // Env-var fallback when DB is empty
+        let with_env = resolve_gcal_config(&base, Some("env-client-id"), Some("env-secret"));
+        assert_eq!(
+            with_env, None,
+            "env vars alone aren't enough without refresh_token"
+        );
+
+        // DB override wins over env var
+        let db_override = AppSettings {
+            gcal_client_id: Some("db-client-id".to_string()),
+            gcal_refresh_token: Some("refresh-token".to_string()),
+            ..base.clone()
+        };
+        let merged =
+            resolve_gcal_config(&db_override, Some("env-client-id"), Some("env-secret")).unwrap();
+        assert_eq!(merged.client_id, "db-client-id");
+        assert_eq!(merged.client_secret, "env-secret");
+
+        // No calendar_id defaults to "primary"
+        let no_cal = AppSettings {
+            gcal_client_id: Some("client-id".to_string()),
+            gcal_client_secret: Some("secret".to_string()),
+            gcal_calendar_id: None,
+            gcal_refresh_token: Some("token".to_string()),
+            ..base
+        };
+        let resolved = resolve_gcal_config(&no_cal, None, None).unwrap();
+        assert_eq!(resolved.calendar_id, "primary");
     }
 
     #[sqlx::test(migrations = "./migrations")]
