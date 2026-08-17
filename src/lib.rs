@@ -57,7 +57,7 @@ pub async fn run() {
     };
     let app = web::router(state);
 
-    tracing::info!(bind_addr = %config.bind_addr, "foodinator starting");
+    tracing::info!(bind_addr = %config.bind_addr, "foodinator v{} starting", env!("CARGO_PKG_VERSION"));
     let listener = tokio::net::TcpListener::bind(&config.bind_addr)
         .await
         .expect("failed to bind address");
