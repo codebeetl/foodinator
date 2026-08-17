@@ -72,18 +72,7 @@
         <p>Pushes non-deleted, not-yet-synced meal plan entries within the next
         14 days to your Google Calendar via OAuth2.</p>
 
-        <form method="post" action="/sync/gcal/save">
-            <label>Client ID
-                <input type="text" name="gcal_client_id" value="{{ gcal_client_id_input }}" placeholder="123456789.apps.googleusercontent.com">
-            </label>
-            <label>Client Secret
-                <input type="password" name="gcal_client_secret" placeholder="{% if gcal_connected %}Saved - leave blank to keep it{% else %}Not set{% endif %}">
-            </label>
 
-            <div class="settings-actions">
-                <button type="submit">Save</button>
-            </div>
-        </form>
     </div>
 
     {% if gcal_just_connected %}
@@ -106,7 +95,7 @@
     </div>
     {% else %}
     {% if !gcal_fields_filled %}
-    <p class="sync-hint"><small>Fill in and save Client ID and Secret above, then click Connect.</small></p>
+    <p class="sync-hint"><small>Set GCAL_CLIENT_ID and GCAL_CLIENT_SECRET environment variables to enable connecting.</small></p>
     {% endif %}
     {% endif %}
 

@@ -13,6 +13,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       APP_TZ: ${APP_TZ}
       DISPLAY_TOKEN: ${DISPLAY_TOKEN}
+      GCAL_REDIRECT_URI: ${GCAL_REDIRECT_URI}
       RUST_LOG: info
     depends_on:
       foodinator-db:

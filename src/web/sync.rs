@@ -63,7 +63,6 @@ pub fn router() -> Router<AppState> {
         .route("/sync", get(show).post(run_sync))
         .route("/sync/ha-test", get(show).post(test_ha_connection))
         .route("/sync/ha-save", get(show).post(save_ha_config))
-        .route("/sync/gcal/save", get(show).post(save_gcal_config))
         .route("/sync/gcal/auth", get(gcal_auth))
         .route("/sync/gcal/callback", get(gcal_callback))
         .route("/sync/gcal/calendars", get(gcal_calendars))
@@ -97,7 +96,6 @@ struct SyncTemplate {
     ha_url_input: String,
     ha_calendar_entity_id_input: String,
     ha_test_result: Option<HaTestOutcome>,
-    gcal_client_id_input: String,
     gcal_connected: bool,
     gcal_fields_filled: bool,
     gcal_sync_result: Option<SyncResults>,
@@ -125,24 +123,21 @@ async fn build_sync_template(state: &AppState) -> SyncTemplate {
     )
     .is_some();
     // "fields filled" means we have a usable client_id + client_secret
-    // from either DB overrides or env-var fallbacks — enough to start OAuth.
-    let effective_client_id = settings
-        .gcal_client_id
+    // from the env vars — enough to start OAuth.
+    let gcal_fields_filled = state
+        .gcal_env_client_id
         .as_deref()
-        .or(state.gcal_env_client_id.as_deref());
-    let effective_client_secret = settings
-        .gcal_client_secret
-        .as_deref()
-        .or(state.gcal_env_client_secret.as_deref());
-    let gcal_fields_filled = effective_client_id.is_some_and(|v| !v.is_empty())
-        && effective_client_secret.is_some_and(|v| !v.is_empty());
+        .is_some_and(|v| !v.is_empty())
+        && state
+            .gcal_env_client_secret
+            .as_deref()
+            .is_some_and(|v| !v.is_empty());
     SyncTemplate {
         ctx,
         results: None,
         ha_url_input: settings.ha_url.unwrap_or_default(),
         ha_calendar_entity_id_input: settings.ha_calendar_entity_id.unwrap_or_default(),
         ha_test_result: None,
-        gcal_client_id_input: settings.gcal_client_id.unwrap_or_default(),
         gcal_connected,
         gcal_fields_filled,
         gcal_sync_result: None,
@@ -238,23 +233,20 @@ async fn run_sync(State(state): State<AppState>) -> SyncTemplate {
         state.gcal_env_client_secret.as_deref(),
     )
     .is_some();
-    let effective_client_id = app_settings
-        .gcal_client_id
+    let gcal_fields_filled = state
+        .gcal_env_client_id
         .as_deref()
-        .or(state.gcal_env_client_id.as_deref());
-    let effective_client_secret = app_settings
-        .gcal_client_secret
-        .as_deref()
-        .or(state.gcal_env_client_secret.as_deref());
-    let gcal_fields_filled = effective_client_id.is_some_and(|v| !v.is_empty())
-        && effective_client_secret.is_some_and(|v| !v.is_empty());
+        .is_some_and(|v| !v.is_empty())
+        && state
+            .gcal_env_client_secret
+            .as_deref()
+            .is_some_and(|v| !v.is_empty());
     SyncTemplate {
         ctx: PageContext::from_state(&state, &app_settings),
         results: Some(SyncResults { synced, failed }),
         ha_url_input: app_settings.ha_url.unwrap_or_default(),
         ha_calendar_entity_id_input: app_settings.ha_calendar_entity_id.unwrap_or_default(),
         ha_test_result: None,
-        gcal_client_id_input: app_settings.gcal_client_id.unwrap_or_default(),
         gcal_connected,
         gcal_fields_filled,
         gcal_sync_result: None,
@@ -291,30 +283,6 @@ async fn save_ha_config(
     template
 }
 
-#[derive(Deserialize)]
-struct GcalConfigForm {
-    gcal_client_id: String,
-    gcal_client_secret: String,
-}
-
-async fn save_gcal_config(
-    State(state): State<AppState>,
-    Form(form): Form<GcalConfigForm>,
-) -> SyncTemplate {
-    settings::update_gcal(
-        &state.pool,
-        super::non_empty(&form.gcal_client_id),
-        super::non_empty(&form.gcal_client_secret),
-        None,
-    )
-    .await
-    .expect("failed to update GCal settings");
-
-    let mut template = build_sync_template(&state).await;
-    template.gcal_client_id_input = form.gcal_client_id;
-    template
-}
-
 fn build_redirect_uri(scheme: &str, host: &str) -> String {
     format!("{scheme}://{host}/sync/gcal/callback")
 }
@@ -331,11 +299,7 @@ fn resolve_redirect_uri(state: &AppState, origin: &RequestOrigin) -> String {
 }
 
 async fn gcal_auth(State(state): State<AppState>, origin: RequestOrigin) -> Redirect {
-    let settings = settings::get(&state.pool)
-        .await
-        .expect("failed to fetch settings");
-
-    let Some(client_id) = settings.gcal_client_id.as_deref() else {
+    let Some(client_id) = state.gcal_env_client_id.as_deref() else {
         return Redirect::temporary("/sync?gcal_error=not_configured");
     };
     if client_id.is_empty() {
@@ -873,35 +837,8 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn saving_gcal_config_persists_to_db(pool: PgPool) -> sqlx::Result<()> {
-        let app = router().with_state(crate::state::test_app_state(pool.clone()));
-
-        let response = app
-            .oneshot(
-                Request::post("/sync/gcal/save")
-                    .header(
-                        axum::http::header::CONTENT_TYPE,
-                        "application/x-www-form-urlencoded",
-                    )
-                    .body(Body::from(
-                        "gcal_client_id=my-client-id&gcal_client_secret=my-secret",
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let settings = settings::get(&pool).await?;
-        assert_eq!(settings.gcal_client_id.as_deref(), Some("my-client-id"));
-        assert_eq!(settings.gcal_client_secret.as_deref(), Some("my-secret"));
-
-        Ok(())
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
     async fn show_renders_gcal_section(pool: PgPool) -> sqlx::Result<()> {
-        // No GCal env vars set and no DB credentials → button should be disabled.
+        // No GCal env vars set → button should be disabled.
         let mut state = crate::state::test_app_state(pool.clone());
         state.gcal_env_client_id = None;
         state.gcal_env_client_secret = None;
@@ -921,42 +858,14 @@ mod tests {
             html.contains("Google Calendar"),
             "should show GCal section: {html}"
         );
-        assert!(
-            html.contains("gcal_client_id"),
-            "should contain GCal Client ID input: {html}"
-        );
-        // No GCal credentials saved yet — connect button should be disabled
+        // No GCal env vars set — connect button should be disabled
         assert!(
             html.contains("aria-disabled=\"true\""),
             "connect button should be disabled when fields are blank: {html}"
         );
         assert!(
-            html.contains("Fill in and save Client ID and Secret"),
+            html.contains("Set GCAL_CLIENT_ID and GCAL_CLIENT_SECRET"),
             "should show hint when fields are blank: {html}"
-        );
-
-        // Save GCal credentials, then verify connect button is enabled
-        settings::update_gcal(&pool, Some("my-client-id"), Some("my-secret"), None).await?;
-
-        let mut state = crate::state::test_app_state(pool);
-        state.gcal_env_client_id = None;
-        state.gcal_env_client_secret = None;
-        let app = router().with_state(state);
-        let response = app
-            .oneshot(Request::get("/sync").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(
-            !html.contains("aria-disabled=\"true\""),
-            "connect button should be enabled after saving credentials: {html}"
-        );
-        assert!(
-            html.contains("/sync/gcal/auth"),
-            "should contain Connect to Google link: {html}"
         );
 
         Ok(())
@@ -964,15 +873,10 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn gcal_auth_redirects_to_google_when_configured(pool: PgPool) -> sqlx::Result<()> {
-        settings::update_gcal(
-            &pool,
-            Some("my-client-id"),
-            Some("my-secret"),
-            Some("cal@group.calendar.google.com"),
-        )
-        .await?;
-
-        let app = router().with_state(crate::state::test_app_state(pool));
+        let mut state = crate::state::test_app_state(pool);
+        state.gcal_env_client_id = Some("my-client-id".to_string());
+        state.gcal_env_client_secret = Some("my-secret".to_string());
+        let app = router().with_state(state);
 
         let response = app
             .oneshot(
@@ -1005,7 +909,10 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn gcal_auth_redirects_with_error_when_not_configured(pool: PgPool) -> sqlx::Result<()> {
-        let app = router().with_state(crate::state::test_app_state(pool));
+        let mut state = crate::state::test_app_state(pool);
+        state.gcal_env_client_id = None;
+        state.gcal_env_client_secret = None;
+        let app = router().with_state(state);
 
         let response = app
             .oneshot(
