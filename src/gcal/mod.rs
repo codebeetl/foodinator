@@ -8,7 +8,7 @@ const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 
 /// Google Calendar OAuth2 scopes needed for event management.
-const SCOPE: &str = "https://www.googleapis.com/auth/calendar.events";
+const SCOPE: &str = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly";
 
 #[derive(Debug)]
 pub enum GcalError {
