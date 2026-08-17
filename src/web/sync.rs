@@ -340,24 +340,25 @@ async fn gcal_callback(
         .await
         .expect("failed to fetch settings");
 
-    let Some(gcal_config) = settings::resolve_gcal_config(
-        &settings,
-        state.gcal_env_client_id.as_deref(),
-        state.gcal_env_client_secret.as_deref(),
-    ) else {
+    // Only client_id and client_secret are needed to exchange the auth code.
+    // resolve_gcal_config requires refresh_token which doesn't exist yet on
+    // first connection — that's the whole point of this OAuth flow.
+    let client_id = settings
+        .gcal_client_id
+        .clone()
+        .or_else(|| state.gcal_env_client_id.clone());
+    let client_secret = settings
+        .gcal_client_secret
+        .clone()
+        .or_else(|| state.gcal_env_client_secret.clone());
+    let (Some(client_id), Some(client_secret)) = (client_id.as_deref(), client_secret.as_deref())
+    else {
         return Redirect::temporary("/sync?gcal_error=not_configured");
     };
 
     let redirect_uri = resolve_redirect_uri(&state, &origin);
 
-    match gcal::exchange_code(
-        &gcal_config.client_id,
-        &gcal_config.client_secret,
-        code,
-        &redirect_uri,
-    )
-    .await
-    {
+    match gcal::exchange_code(client_id, client_secret, code, &redirect_uri).await {
         Ok(tokens) => {
             if let Some(refresh_token) = &tokens.refresh_token {
                 settings::set_gcal_refresh_token(&state.pool, refresh_token)
