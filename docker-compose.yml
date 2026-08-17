@@ -5,7 +5,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: postgres://foodinator:foodinator@db:5432/foodinator
+      DATABASE_URL: postgres://foodinator:foodinator@foodinator-db:5432/foodinator
       HA_URL: ${HA_URL}
       HA_TOKEN: ${HA_TOKEN}
       HA_CALENDAR_ENTITY_ID: ${HA_CALENDAR_ENTITY_ID}
@@ -15,10 +15,10 @@ services:
       DISPLAY_TOKEN: ${DISPLAY_TOKEN}
       RUST_LOG: info
     depends_on:
-      db:
+      foodinator-db:
         condition: service_healthy
 
-  db:
+  foodinator-db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
