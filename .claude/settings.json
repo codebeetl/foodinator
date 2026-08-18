@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__memory__search_nodes",
+      "mcp__memory__get_entity_with_relations",
+      "mcp__memory__search_all_projects",
+      "Bash(chrome-agent goto *)",
+      "Bash(chrome-agent screenshot *)",
+      "mcp__plugin_reverse-api-engineer_rae-playwright-mcp__browser_navigate",
+      "mcp__plugin_reverse-api-engineer_rae-playwright-mcp__browser_take_screenshot",
+      "Bash(git fetch *)",
+      "mcp__memory__read_graph",
+      "Bash(git grep *)",
+      "Bash(gh run watch *)",
+      "Bash(docker compose ps *)",
+      "Bash(chrome-agent inspect *)",
+      "mcp__dokploy-mcp__docker-getContainers",
+      "mcp__dokploy-mcp__compose-one",
+      "mcp__dokploy-mcp__docker-getConfig",
+      "mcp__dokploy-mcp__compose-readLogs",
+      "mcp__dokploy-mcp__deployment-allByCompose",
+      "mcp__plugin_reverse-api-engineer_rae-playwright-mcp__browser_snapshot",
+      "mcp__dokploy-mcp__docker-getContainersByAppNameMatch"
+    ]
+  }
+}
