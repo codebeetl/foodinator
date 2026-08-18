@@ -100,11 +100,21 @@ update. Releasing is fully automated off of that field - to cut a release:
 1. Bump `version` in `Cargo.toml` following semver (patch for fixes, minor for new
    backward-compatible features, major for breaking changes), commit, and push to
    `main`.
-2. `.github/workflows/release.yml` triggers automatically once CI succeeds on `main`.
-   It reads the version straight from `Cargo.toml`, and - only if a tag matching
-   `vX.Y.Z` doesn't already exist on the remote - runs `gh release create` with
-   auto-generated notes. No manual `gh release create` step needed; pushing a bumped
-   version is the entire release action.
-3. `.github/workflows/docker-publish.yml` triggers on that release being published and
-   pushes `ghcr.io/codebeetl/foodinator` tagged both `:latest` and `:vX.Y.Z`, reading
-   the tag straight off the GitHub Release event.
+2. `.github/workflows/release.yml` triggers automatically once CI succeeds on `main`
+   (via a `workflow_run` trigger, not a `release` event - see below for why that
+   matters). Its `release` job reads the version straight from `Cargo.toml` and, only
+   if a tag matching `vX.Y.Z` doesn't already exist on the remote, runs
+   `gh release create` with auto-generated notes. Its `publish-image` job then builds
+   and pushes `ghcr.io/codebeetl/foodinator` tagged both `:latest` and `:vX.Y.Z`, but
+   only runs when the release job actually created a new release. No manual step
+   needed; pushing a bumped version is the entire release action.
+
+Both jobs live in the *same* workflow file deliberately: `gh release create` in the
+`release` job authenticates with `secrets.GITHUB_TOKEN`, and GitHub Actions'
+anti-recursion protection means an event authored by `GITHUB_TOKEN` (like the release
+this creates) never triggers another workflow's own `on: release` trigger - a separate
+`docker-publish.yml` listening for `release: published` would build against `main`
+successfully every time in testing (via a manually-created release) but silently never
+fire from the automated pipeline. Keeping `publish-image` as a `needs: release` job in
+the same workflow sidesteps that restriction entirely, since it's a job dependency, not
+a cross-workflow trigger.
