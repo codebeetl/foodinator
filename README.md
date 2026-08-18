@@ -5,11 +5,11 @@ a household appliance?*
 
 A standalone helper application that manages consumers (people), meals, standing
 like/dislike preferences, and a week-grid meal plan (one shared family meal per
-calendar day). It can optionally push the resulting plan into a remote Home
-Assistant instance as calendar events - the HA integration is off by default and
-only activates once it's configured (see [Configuration](#configuration) below).
-It runs in its own container on the network - it is **not** a Home Assistant
-custom_component/HACS integration.
+calendar day). It can optionally push the resulting plan as calendar events into
+a remote Home Assistant instance and/or a Google Calendar - both integrations are
+off by default and only activate once configured (see
+[Configuration](#configuration) below). It runs in its own container on the
+network - it is **not** a Home Assistant custom_component/HACS integration.
 
 ## Architecture
 
@@ -27,9 +27,10 @@ docker compose up --build
 
 The admin web UI (HTTP Basic auth, `ADMIN_USERNAME`/`ADMIN_PASSWORD` from `.env`) is
 served at `http://localhost:8080/plan`. Other pages: `/consumers`, `/meals`,
-`/settings`, and `/sync` (manual "push to Home Assistant" trigger, only shown once
-HA is configured). Health checks are unauthenticated at `/healthz` (liveness) and
-`/readyz` (checks the database connection).
+`/settings`, and `/sync` (manual sync triggers for Home Assistant and/or Google
+Calendar, each section only shown once that integration is configured). Health
+checks are unauthenticated at `/healthz` (liveness) and `/readyz` (checks the
+database connection).
 
 For a persistent deployment on a home server (e.g. OpenMediaVault), see
 [Deploying on a local server](#deploying-on-a-local-server-eg-openmediavault) below.
@@ -45,6 +46,9 @@ All configuration is via environment variables (see `.env.example`):
 | `HA_URL` | no | Base URL of your Home Assistant instance, no trailing slash |
 | `HA_TOKEN` | no | HA long-lived access token |
 | `HA_CALENDAR_ENTITY_ID` | no | Entity ID of the Local Calendar to push events to |
+| `GCAL_CLIENT_ID` | no | Google OAuth2 client ID (from a Google Cloud project) |
+| `GCAL_CLIENT_SECRET` | no | Google OAuth2 client secret |
+| `GCAL_REDIRECT_URI` | no | Override for the OAuth redirect URI - only needed for tunnel/proxy setups, see below |
 | `ADMIN_USERNAME` | yes | HTTP Basic auth username for the admin UI |
 | `ADMIN_PASSWORD` | yes | HTTP Basic auth password for the admin UI |
 | `APP_TZ` | yes | IANA timezone the household lives in, e.g. `Australia/Sydney` - used for "today" in the week-grid planner and to convert meal times to UTC when pushing to Home Assistant |
@@ -71,6 +75,27 @@ While HA is unconfigured, the `/sync` page, the "Sync" nav link, and the admin
 
 See [docs/HA_SETUP.md](docs/HA_SETUP.md) for creating the Local Calendar integration
 and generating a long-lived access token.
+
+### Google Calendar integration (optional)
+
+Unlike HA, the OAuth2 client ID/secret are env-var-only (`GCAL_CLIENT_ID` /
+`GCAL_CLIENT_SECRET`, not editable from the Settings page) - create them from a
+Google Cloud project's **APIs & Services -> Credentials** page (OAuth client ID,
+type "Web application"), with an authorized redirect URI of
+`http://<host>:8080/sync/gcal/callback` (or your `GCAL_REDIRECT_URI` override, see
+[Configuration](#configuration) above). The integration is hidden entirely until
+both are set.
+
+Once configured, `/sync` shows a **Connect to Google** button that starts the
+OAuth2 consent flow; after consent, a picker lets you choose which of your
+calendars to sync to (stored in the database, not an env var). From then on, a
+**Sync to Google Calendar** button pushes non-deleted, not-yet-synced meal-plan
+entries within the next 14 days - same manual, global, horizon-limited model as
+the HA sync described above, with its own separate sync ledger. If Google
+Calendar access is later revoked (e.g. from your Google Account's "Third-party
+apps" settings), the next sync attempt detects this, clears the stored
+authorization, and shows a message prompting you to reconnect - it does not keep
+retrying with a dead token.
 
 ### Wall-display kiosk view (optional)
 
@@ -242,9 +267,14 @@ DATABASE_URL=postgres://... cargo sqlx prepare
   details and the sync-horizon/ledger workaround this project uses. A meal-plan
   entry that changes *after* it's been synced needs manual cleanup in HA's own
   calendar UI.
-- Syncing to Home Assistant is a manual, global action (the "Sync to Home
-  Assistant" button on `/sync`), not a background loop, and only considers entries
-  within a 14-day horizon - by design, not a current limitation to fix.
+- Syncing to Home Assistant or Google Calendar is a manual, global action (the
+  "Sync to Home Assistant" / "Sync to Google Calendar" buttons on `/sync`), not a
+  background loop, and only considers entries within a 14-day horizon - by design,
+  not a current limitation to fix.
+- Google only allows `localhost` as an OAuth2 redirect host for private-network
+  setups - accessing `/sync` from a machine other than the server itself needs
+  `GCAL_REDIRECT_URI` pointed at a tunnel (ngrok, Cloudflare Tunnel, etc.) for the
+  "Connect to Google" flow to complete.
 - Auth is HTTP Basic only, suitable for a LAN-only admin tool behind your own
   network boundary - don't expose port 8080 directly to the internet without a
   reverse proxy adding real authentication and TLS in front of it.
