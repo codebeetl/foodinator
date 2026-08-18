@@ -50,6 +50,7 @@ pub async fn run() {
         gcal_env_client_id: config.gcal_client_id.clone(),
         gcal_env_client_secret: config.gcal_client_secret.clone(),
         gcal_redirect_uri: config.gcal_redirect_uri.clone(),
+        gcal_token_url: None,
         admin_username: config.admin_username.clone(),
         admin_password: config.admin_password.clone(),
         household_tz,

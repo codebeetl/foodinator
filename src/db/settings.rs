@@ -216,6 +216,17 @@ pub async fn set_gcal_refresh_token(pool: &PgPool, token: &str) -> sqlx::Result<
     Ok(())
 }
 
+/// Clears a revoked/invalid refresh token so the app reverts to showing
+/// "not connected" instead of repeatedly retrying with a dead token.
+pub async fn clear_gcal_refresh_token(pool: &PgPool) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE app_settings SET gcal_refresh_token = NULL, updated_at = now() WHERE id = 1"
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,6 +528,18 @@ mod tests {
             settings.gcal_refresh_token.as_deref(),
             Some("my-refresh-token")
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn clear_gcal_refresh_token_removes_a_stored_token(pool: PgPool) -> sqlx::Result<()> {
+        set_gcal_refresh_token(&pool, "my-refresh-token").await?;
+
+        clear_gcal_refresh_token(&pool).await?;
+
+        let settings = get(&pool).await?;
+        assert_eq!(settings.gcal_refresh_token, None);
 
         Ok(())
     }

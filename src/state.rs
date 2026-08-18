@@ -26,6 +26,9 @@ pub struct AppState {
     pub gcal_env_client_secret: Option<String>,
     // Override for the OAuth redirect URI (e.g. tunnel URL).
     pub gcal_redirect_uri: Option<String>,
+    // Override for the OAuth token endpoint - None uses Google's real one;
+    // tests point this at a wiremock server.
+    pub gcal_token_url: Option<String>,
     pub admin_username: String,
     pub admin_password: String,
     pub household_tz: Tz,
@@ -107,6 +110,7 @@ pub fn test_app_state(pool: PgPool) -> AppState {
         gcal_env_client_id: Some("test-gcal-client-id".to_string()),
         gcal_env_client_secret: Some("test-gcal-secret".to_string()),
         gcal_redirect_uri: None,
+        gcal_token_url: None,
         admin_username: "admin".to_string(),
         admin_password: "hunter2".to_string(),
         household_tz: chrono_tz::UTC,

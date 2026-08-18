@@ -452,6 +452,7 @@ async fn run_gcal_sync(State(state): State<AppState>) -> SyncTemplate {
 
     let refresh_token = &gcal_config.refresh_token;
     let access_token = match gcal::refresh_access_token(
+        state.gcal_token_url.as_deref(),
         &gcal_config.client_id,
         &gcal_config.client_secret,
         refresh_token,
@@ -459,6 +460,15 @@ async fn run_gcal_sync(State(state): State<AppState>) -> SyncTemplate {
     .await
     {
         Ok(token) => token,
+        Err(gcal::GcalError::TokenRevoked(_)) => {
+            settings::clear_gcal_refresh_token(&state.pool)
+                .await
+                .expect("failed to clear revoked refresh token");
+            let mut template = build_sync_template(&state).await;
+            template.gcal_error =
+                Some("Google Calendar authorization was revoked - please reconnect.".into());
+            return template;
+        }
         Err(err) => {
             let mut template = build_sync_template(&state).await;
             template.gcal_error = Some(format!("Token refresh failed: {err}"));
@@ -903,6 +913,59 @@ mod tests {
         assert!(
             location.contains("client_id=my-client-id"),
             "should include client_id: {location}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn run_gcal_sync_clears_stale_refresh_token_when_google_reports_invalid_grant(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": "invalid_grant",
+                "error_description": "Token has been expired or revoked.",
+            })))
+            .mount(&server)
+            .await;
+
+        settings::update_gcal(
+            &pool,
+            Some("client-id"),
+            Some("client-secret"),
+            Some("primary"),
+        )
+        .await?;
+        settings::set_gcal_refresh_token(&pool, "revoked-token").await?;
+
+        let mut state = crate::state::test_app_state(pool.clone());
+        state.gcal_token_url = Some(server.uri());
+        let app = router().with_state(state);
+
+        let response = app
+            .oneshot(Request::post("/sync/gcal").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("revoked") && html.contains("reconnect"),
+            "should show a reconnect message: {html}"
+        );
+
+        let settings_after = settings::get(&pool).await?;
+        assert_eq!(
+            settings_after.gcal_refresh_token, None,
+            "the revoked refresh token should be cleared"
         );
 
         Ok(())

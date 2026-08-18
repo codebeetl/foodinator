@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE app_settings SET gcal_refresh_token = NULL, updated_at = now() WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "5fa9fe8ba7b46835d52938074d6169ab8420eb0ba946e7df2512d389db32d102"
+}
