@@ -95,13 +95,16 @@ fails CI's `build`, `clippy`, and `sqlx-check` jobs.
 The app's version (shown on the Settings page and baked into the GHCR image tag) is
 read at compile time from `Cargo.toml`'s `version` field
 (`env!("CARGO_PKG_VERSION")` in `src/web/settings.rs`) - there's no separate place to
-update. To cut a release:
+update. Releasing is fully automated off of that field - to cut a release:
 
 1. Bump `version` in `Cargo.toml` following semver (patch for fixes, minor for new
-   backward-compatible features, major for breaking changes) and commit it.
-2. Push, then `gh release create vX.Y.Z` (tag must match the bumped version, prefixed
-   with `v`) with release notes.
-3. `.github/workflows/docker-publish.yml` triggers on the release being published and
-   pushes `ghcr.io/codebeetl/foodinator` tagged both `:latest` and `:vX.Y.Z` - no
-   separate version-bump step needed there, it reads the tag straight off the
-   GitHub Release event.
+   backward-compatible features, major for breaking changes), commit, and push to
+   `main`.
+2. `.github/workflows/release.yml` triggers automatically once CI succeeds on `main`.
+   It reads the version straight from `Cargo.toml`, and - only if a tag matching
+   `vX.Y.Z` doesn't already exist on the remote - runs `gh release create` with
+   auto-generated notes. No manual `gh release create` step needed; pushing a bumped
+   version is the entire release action.
+3. `.github/workflows/docker-publish.yml` triggers on that release being published and
+   pushes `ghcr.io/codebeetl/foodinator` tagged both `:latest` and `:vX.Y.Z`, reading
+   the tag straight off the GitHub Release event.
