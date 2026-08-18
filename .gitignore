@@ -1,5 +1,6 @@
 /target
 .env
+opencode.json
 *.pdb
 .DS_Store
 .idea/
