@@ -77,10 +77,6 @@ async fn build_days(state: &AppState) -> (NaiveDate, Vec<DisplayDay>) {
 
         let day = match live_entry {
             Some(entry) => {
-                let meal = meals::get(&state.pool, entry.meal_id)
-                    .await
-                    .expect("failed to fetch meal")
-                    .expect("meal_plan_entries.meal_id references an existing meal");
                 let attendee_ids = meal_plan::get_attendance(&state.pool, entry.id)
                     .await
                     .expect("failed to fetch attendance");
@@ -90,23 +86,36 @@ async fn build_days(state: &AppState) -> (NaiveDate, Vec<DisplayDay>) {
                     .map(|c| c.name.clone())
                     .collect();
                 attendee_names.extend(entry.guest_names.iter().cloned());
-                let sync_status = if ha_configured {
-                    Some(
+                let start_time = entry.effective_start_time(app_settings.default_start_time);
+                let notes = entry.notes.filter(|_| is_today).filter(|n| !n.is_empty());
+                // A day whose meal was cleared is still a real, configured day
+                // - show its time and who's coming, just with no meal to name.
+                let meal_name = match entry.meal_id {
+                    Some(meal_id) => Some(
+                        meals::get(&state.pool, meal_id)
+                            .await
+                            .expect("failed to fetch meal")
+                            .expect("meal_plan_entries.meal_id references an existing meal")
+                            .name,
+                    ),
+                    None => None,
+                };
+                let sync_status = match (ha_configured, meal_name.is_some()) {
+                    (true, true) => Some(
                         sync_db::status_for_entry(&state.pool, entry.id)
                             .await
                             .expect("failed to fetch sync status")
                             .as_str(),
-                    )
-                } else {
-                    None
+                    ),
+                    // No meal means nothing was ever pushed for this day, so
+                    // there's no sync state worth reporting.
+                    _ => None,
                 };
-                let start_time = entry.effective_start_time(app_settings.default_start_time);
-                let notes = entry.notes.filter(|_| is_today).filter(|n| !n.is_empty());
 
                 DisplayDay {
                     date_label: date.format("%A, %-d %B").to_string(),
                     is_today,
-                    meal_name: Some(meal.name),
+                    meal_name,
                     meal_time: Some(start_time.format("%-I:%M %p").to_string()),
                     attendees: (!attendee_names.is_empty()).then(|| attendee_names.join(", ")),
                     notes,
@@ -518,6 +527,65 @@ mod tests {
         assert_eq!(days.len(), 7);
         let todays = days.iter().find(|d| d["is_today"] == true).unwrap();
         assert_eq!(todays["meal_name"], "Tacos");
+        assert_eq!(todays["attendees"], "Alice");
+
+        Ok(())
+    }
+
+    /// Clearing the meal off a day doesn't undo the rest of it, so the kiosk
+    /// should still show when it's happening and who's coming - just with no
+    /// meal to name.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn shows_the_time_and_attendees_of_a_day_whose_meal_was_cleared(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = consumers::insert(&pool, "Alice").await?;
+        let tacos = meals::insert(&pool, "Tacos").await?;
+        let today = clock::today(&chrono_tz::UTC);
+        pin_week_start_to_today(&pool, today).await;
+        let entry = meal_plan::upsert_entry(
+            &pool,
+            today,
+            tacos.id,
+            None,
+            Some(chrono::NaiveTime::from_hms_opt(19, 30, 0).unwrap()),
+            None,
+            &[],
+        )
+        .await?;
+        meal_plan::set_attendance(&pool, entry.id, &[alice.id]).await?;
+        meal_plan::clear_meal(&pool, today).await?;
+
+        let mut state = crate::state::test_app_state(pool);
+        state.display_token = Some("kiosk-secret".to_string());
+        let app = router().with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::get("/display/data?token=kiosk-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let todays = json["days"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["is_today"] == true)
+            .unwrap();
+
+        assert!(
+            todays["meal_name"].is_null(),
+            "the meal is gone, so there should be no name to show: {todays}"
+        );
+        assert_eq!(todays["meal_time"], "7:30 PM");
         assert_eq!(todays["attendees"], "Alice");
 
         Ok(())

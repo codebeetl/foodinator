@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT meal_id, MAX(entry_date) AS \"last_planned!: NaiveDate\"\n           FROM meal_plan_entries\n           WHERE deleted_at IS NULL\n           GROUP BY meal_id",
+  "query": "SELECT meal_id AS \"meal_id!: i64\", MAX(entry_date) AS \"last_planned!: NaiveDate\"\n           FROM meal_plan_entries\n           WHERE deleted_at IS NULL\n             AND meal_id IS NOT NULL\n           GROUP BY meal_id",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "meal_id",
+        "name": "meal_id!: i64",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -25,9 +25,9 @@
       "Left": []
     },
     "nullable": [
-      false,
+      true,
       null
     ]
   },
-  "hash": "5eb54bd93f201a767a593052b16d60e03e5ebb55b1ca3208d2fb5769c87d6e35"
+  "hash": "0d2d44727ba9d36d39638d1f31542c6f711bded6a3f53427b44e4da2ec4c8013"
 }

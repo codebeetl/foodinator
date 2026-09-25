@@ -5,7 +5,10 @@ use sqlx::PgPool;
 pub struct MealPlanEntry {
     pub id: i64,
     pub entry_date: NaiveDate,
-    pub meal_id: i64,
+    /// `None` once the meal has been cleared from the day. The rest of the
+    /// entry (notes, guests, attendees, time/duration overrides) deliberately
+    /// survives that, so a day can be configured without a meal.
+    pub meal_id: Option<i64>,
     pub notes: Option<String>,
     pub start_time_override: Option<NaiveTime>,
     pub duration_minutes_override: Option<i32>,
@@ -47,15 +50,20 @@ pub struct MealSuitability {
 
 /// Inserts or updates the single meal_plan_entries row for `entry_date`,
 /// un-deleting it if it was previously soft-deleted.
+///
+/// `meal_id` accepts either an `i64` or a `None`/`Option<i64>` - a `None` writes
+/// a day that is configured but has no meal. Existing callers name a real meal
+/// and stay unchanged.
 pub async fn upsert_entry(
     pool: &PgPool,
     entry_date: NaiveDate,
-    meal_id: i64,
+    meal_id: impl Into<Option<i64>>,
     notes: Option<&str>,
     start_time_override: Option<NaiveTime>,
     duration_minutes_override: Option<i32>,
     guest_names: &[String],
 ) -> sqlx::Result<MealPlanEntry> {
+    let meal_id = meal_id.into();
     sqlx::query_as!(
         MealPlanEntry,
         "INSERT INTO meal_plan_entries \
@@ -80,6 +88,23 @@ pub async fn upsert_entry(
     )
     .fetch_one(pool)
     .await
+}
+
+/// Drops the meal from `entry_date` while keeping the rest of the day -
+/// notes, guests, attendance, and the time/duration overrides all survive, so
+/// this is "remove the meal", not "clear the day". Distinct from
+/// `soft_delete`, which is what the day's "Clear this day" button does.
+/// A no-op (not an error) when there's no active entry, or when the day
+/// already has no meal.
+pub async fn clear_meal(pool: &PgPool, entry_date: NaiveDate) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE meal_plan_entries SET meal_id = NULL, updated_at = now() \
+         WHERE entry_date = $1 AND deleted_at IS NULL",
+        entry_date
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Soft-deletes the entry for `entry_date`, if a non-deleted one exists.
@@ -193,12 +218,12 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
 
         let first = upsert_entry(&pool, date, tacos.id, Some("first"), None, None, &[]).await?;
-        assert_eq!(first.meal_id, tacos.id);
+        assert_eq!(first.meal_id, Some(tacos.id));
 
         let second =
             upsert_entry(&pool, date, pasta.id, Some("second"), None, Some(45), &[]).await?;
         assert_eq!(second.id, first.id, "same date should update the same row");
-        assert_eq!(second.meal_id, pasta.id);
+        assert_eq!(second.meal_id, Some(pasta.id));
         assert_eq!(second.notes.as_deref(), Some("second"));
         assert_eq!(second.duration_minutes_override, Some(45));
 

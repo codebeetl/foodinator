@@ -7,7 +7,7 @@
 {% endmacro %}
 
 {% macro plan_day_card(day, week_start, consumers) %}
-<div class="card plan-day" data-date="{{ day.date }}">
+<div class="card plan-day" data-date="{{ day.date }}" data-planned="{{ day.has_entry }}">
     <h3>{{ day.date_label }}</h3>
     <form method="post" action="/plan/{{ day.date }}" class="plan-day-form">
         <input type="hidden" name="week_start" value="{{ week_start }}">
@@ -19,8 +19,8 @@
                     {% if let Some(name) = day.selected_meal_name %}{{ name }}{% else %}Choose a meal{% endif %}
                 </button>
             </label>
-            {% if day.has_entry %}
-            <button type="button" class="meal-picker-clear" aria-label="Clear this day">&times;</button>
+            {% if day.has_meal %}
+            <button type="button" class="meal-picker-clear" aria-label="Remove meal">&times;</button>
             {% endif %}
         </div>
 
@@ -70,8 +70,16 @@
     </form>
     <form method="post" action="/plan/{{ day.date }}/suggest" class="plan-day-suggest-form inline">
         <input type="hidden" name="week_start" value="{{ week_start }}">
-        <button type="submit" class="secondary">{% if day.has_entry %}Reroll{% else %}Suggest{% endif %}</button>
+        <button type="submit" class="secondary">{% if day.has_meal %}Reroll{% else %}Suggest{% endif %}</button>
     </form>
+    {% if day.has_meal %}
+    {# Submit target for the x next to the picker; it can't live inside the
+       day form (nested forms are invalid) and has no button of its own. #}
+    <form method="post" action="/plan/{{ day.date }}/clear-meal" class="plan-day-clear-meal-form" hidden
+          onsubmit="return confirm('Remove the meal for this day? Everything else is kept.');">
+        <input type="hidden" name="week_start" value="{{ week_start }}">
+    </form>
+    {% endif %}
     {% if day.has_entry %}
     <form method="post" action="/plan/{{ day.date }}/delete" class="plan-day-clear-form inline"
           onsubmit="return confirm('Clear this day? This cannot be undone.');">

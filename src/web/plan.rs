@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/plan", get(show))
         .route("/plan/{date}", post(update))
         .route("/plan/{date}/delete", post(delete))
+        .route("/plan/{date}/clear-meal", post(clear_meal))
         .route("/plan/{date}/suggest", post(suggest_day))
         .route("/plan/week/suggest", post(suggest_week))
 }
@@ -31,7 +32,13 @@ pub fn router() -> Router<AppState> {
 struct PlanDay {
     date: NaiveDate,
     date_label: String,
+    /// A day that exists at all - a non-deleted row. True even once the meal
+    /// has been cleared, which is what keeps "Clear this day" reachable so the
+    /// notes/time/attendees you left behind can still be wiped.
     has_entry: bool,
+    /// A day that currently names a meal. Gates the clear-the-meal button and
+    /// the Reroll/Suggest label - neither means anything with no meal.
+    has_meal: bool,
     selected_meal_id: Option<i64>,
     selected_meal_name: Option<String>,
     notes: String,
@@ -131,7 +138,7 @@ async fn build_plan_day(
     let meals = meal_plan::suitability_for_attendees(pool, &attendee_ids)
         .await
         .expect("failed to compute suitability");
-    let selected_meal_id = live_entry.as_ref().map(|entry| entry.meal_id);
+    let selected_meal_id = live_entry.as_ref().and_then(|entry| entry.meal_id);
     let selected_meal_name = selected_meal_id
         .and_then(|id| meals.iter().find(|m| m.id == id))
         .map(|m| m.name.clone());
@@ -143,6 +150,9 @@ async fn build_plan_day(
         date,
         date_label: date.format("%A, %-d %B").to_string(),
         has_entry: live_entry.is_some(),
+        has_meal: live_entry
+            .as_ref()
+            .is_some_and(|entry| entry.meal_id.is_some()),
         selected_meal_id,
         selected_meal_name,
         notes: live_entry
@@ -208,7 +218,11 @@ async fn show(State(state): State<AppState>, Query(query): Query<PlanQuery>) -> 
 #[derive(Deserialize)]
 struct UpdatePlanForm {
     week_start: NaiveDate,
-    meal_id: i64,
+    // Kept as a String rather than Option<i64> because the form always posts a
+    // value, and it's empty once the meal has been cleared from the day - so
+    // the rest of the form (notes, time, attendees) can still autosave with no
+    // meal named.
+    meal_id: String,
     notes: String,
     meal_time: String,
     duration_minutes: String,
@@ -245,6 +259,9 @@ async fn update(
         .expect("failed to load settings");
 
     let notes = super::non_empty(&form.notes);
+    // An empty meal_id is a legitimate state, not a bad request: the day exists
+    // but has no meal, and this is how its other fields keep saving.
+    let meal_id = form.meal_id.trim().parse::<i64>().ok();
     let meal_time = form
         .meal_time
         .parse::<NaiveTime>()
@@ -261,7 +278,7 @@ async fn update(
     let entry = meal_plan::upsert_entry(
         &state.pool,
         date,
-        form.meal_id,
+        meal_id,
         notes,
         start_time_override,
         duration_minutes_override,
@@ -341,6 +358,48 @@ async fn delete(
 }
 
 #[derive(Deserialize)]
+struct ClearMealForm {
+    week_start: NaiveDate,
+}
+
+/// Removes just the meal from a day, keeping its notes, guests, attendees, and
+/// time/duration overrides. The clear button next to the picker posts here; the
+/// day's "Clear this day" button still soft-deletes the whole entry.
+async fn clear_meal(
+    State(state): State<AppState>,
+    Path(date): Path<NaiveDate>,
+    headers: HeaderMap,
+    Form(form): Form<ClearMealForm>,
+) -> Response {
+    meal_plan::clear_meal(&state.pool, date)
+        .await
+        .expect("failed to clear meal from plan entry");
+
+    if super::is_ajax_request(&headers) {
+        let app_settings = settings::get(&state.pool)
+            .await
+            .expect("failed to load settings");
+        let consumers = active_consumers(&state.pool).await;
+        let day = build_plan_day(
+            &state.pool,
+            date,
+            &consumers,
+            app_settings.default_start_time,
+            app_settings.default_duration_minutes,
+        )
+        .await;
+        return PlanDayFragmentTemplate {
+            day,
+            week_start: form.week_start,
+            consumers,
+        }
+        .into_response();
+    }
+
+    Redirect::to(&format!("/plan?start={}", form.week_start)).into_response()
+}
+
+#[derive(Deserialize)]
 struct SuggestDayForm {
     week_start: NaiveDate,
 }
@@ -390,7 +449,7 @@ async fn suggest_day(
         &candidates,
         date,
         &attendee_ids,
-        live_entry.as_ref().map(|entry| entry.meal_id),
+        live_entry.as_ref().and_then(|entry| entry.meal_id),
         jitter,
     );
 
@@ -480,31 +539,56 @@ async fn suggest_week(
         if date < today {
             continue;
         }
-        let has_entry = meal_plan::get_by_date(&state.pool, date)
+        let live_entry = meal_plan::get_by_date(&state.pool, date)
             .await
             .expect("failed to fetch plan entry")
-            .is_some_and(|entry| entry.deleted_at.is_none());
-        if has_entry {
+            .filter(|entry| entry.deleted_at.is_none());
+        // A day whose meal was cleared still wants filling - it has no meal,
+        // just notes and an attendee list that must survive the pick.
+        if live_entry
+            .as_ref()
+            .is_some_and(|entry| entry.meal_id.is_some())
+        {
             continue;
         }
 
-        let picked_meal_id = crate::suggest::score_candidates(
-            &candidates,
-            date,
-            &default_attendee_ids,
-            None,
-            jitter,
-        );
+        let attendee_ids = match &live_entry {
+            Some(entry) => meal_plan::get_attendance(&state.pool, entry.id)
+                .await
+                .expect("failed to fetch attendance"),
+            None => default_attendee_ids.clone(),
+        };
+
+        let picked_meal_id =
+            crate::suggest::score_candidates(&candidates, date, &attendee_ids, None, jitter);
         let Some(meal_id) = picked_meal_id else {
             continue;
         };
 
-        let entry = meal_plan::upsert_entry(&state.pool, date, meal_id, None, None, None, &[])
-            .await
-            .expect("failed to upsert plan entry");
-        meal_plan::set_attendance(&state.pool, entry.id, &default_attendee_ids)
-            .await
-            .expect("failed to set attendance");
+        match &live_entry {
+            Some(entry) => {
+                meal_plan::upsert_entry(
+                    &state.pool,
+                    date,
+                    meal_id,
+                    entry.notes.as_deref(),
+                    entry.start_time_override,
+                    entry.duration_minutes_override,
+                    &entry.guest_names,
+                )
+                .await
+                .expect("failed to upsert plan entry");
+            }
+            None => {
+                let entry =
+                    meal_plan::upsert_entry(&state.pool, date, meal_id, None, None, None, &[])
+                        .await
+                        .expect("failed to upsert plan entry");
+                meal_plan::set_attendance(&state.pool, entry.id, &default_attendee_ids)
+                    .await
+                    .expect("failed to set attendance");
+            }
+        }
 
         if let Some(candidate) = candidates.iter_mut().find(|c| c.id == meal_id) {
             candidate.planned_dates.push(date);
@@ -554,7 +638,7 @@ mod tests {
         let entry = meal_plan::get_by_date(&pool, date)
             .await?
             .expect("entry should exist");
-        assert_eq!(entry.meal_id, tacos.id);
+        assert_eq!(entry.meal_id, Some(tacos.id));
         assert_eq!(entry.notes.as_deref(), Some("Family dinner"));
         assert_eq!(
             entry.start_time_override,
@@ -701,6 +785,199 @@ mod tests {
         assert!(
             !html.contains("Clear this day"),
             "fragment for a cleared day should not show the clear button: {html}"
+        );
+
+        Ok(())
+    }
+
+    /// The x next to the picker is "remove the meal", not "clear the day" -
+    /// everything the user configured around the meal has to survive it.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn clearing_only_the_meal_keeps_the_rest_of_the_day(pool: PgPool) -> sqlx::Result<()> {
+        let alice = consumers::insert(&pool, "Alice").await?;
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let entry = meal_plan::upsert_entry(
+            &pool,
+            date,
+            tacos.id,
+            Some("Family dinner"),
+            Some(NaiveTime::from_hms_opt(19, 0, 0).unwrap()),
+            Some(45),
+            &["Aunt Jane".to_string()],
+        )
+        .await?;
+        meal_plan::set_attendance(&pool, entry.id, &[alice.id]).await?;
+
+        meal_plan::clear_meal(&pool, date).await?;
+
+        let after = meal_plan::get_by_date(&pool, date).await?.expect("entry");
+        assert_eq!(after.meal_id, None, "the meal should be gone");
+        assert_eq!(after.notes.as_deref(), Some("Family dinner"));
+        assert_eq!(
+            after.start_time_override,
+            Some(NaiveTime::from_hms_opt(19, 0, 0).unwrap())
+        );
+        assert_eq!(after.duration_minutes_override, Some(45));
+        assert_eq!(after.guest_names, vec!["Aunt Jane".to_string()]);
+        assert_eq!(
+            meal_plan::get_attendance(&pool, after.id).await?,
+            vec![alice.id]
+        );
+        assert!(after.deleted_at.is_none(), "the day itself is still live");
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn clearing_only_the_meal_via_ajax_keeps_the_notes_time_and_attendees(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = consumers::insert(&pool, "Alice").await?;
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let entry = meal_plan::upsert_entry(
+            &pool,
+            date,
+            tacos.id,
+            Some("Family dinner"),
+            Some(NaiveTime::from_hms_opt(19, 0, 0).unwrap()),
+            Some(45),
+            &[],
+        )
+        .await?;
+        meal_plan::set_attendance(&pool, entry.id, &[alice.id]).await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post(format!("/plan/{date}/clear-meal"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .body(Body::from("week_start=2026-08-08"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let after = meal_plan::get_by_date(&pool, date).await?.expect("entry");
+        assert_eq!(after.meal_id, None);
+        assert_eq!(after.notes.as_deref(), Some("Family dinner"));
+        assert_eq!(
+            meal_plan::get_attendance(&pool, after.id).await?,
+            vec![alice.id]
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains("Choose a meal"),
+            "the picker should fall back to its placeholder: {html}"
+        );
+        assert!(
+            html.contains("Family dinner"),
+            "notes should still be on the card: {html}"
+        );
+        assert!(
+            html.contains("Clear this day"),
+            "a meal-less day is still configured, so the whole-day clear must \
+             stay reachable: {html}"
+        );
+        assert!(
+            !html.contains("meal-picker-clear"),
+            "there is no meal left to remove: {html}"
+        );
+
+        Ok(())
+    }
+
+    /// A day whose meal was cleared is still a day, so the other fields must
+    /// keep autosaving - otherwise the time the user just set silently reverts
+    /// until they pick a meal again.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn updating_a_day_with_a_blank_meal_id_keeps_its_other_fields(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        meal_plan::upsert_entry(&pool, date, tacos.id, None, None, None, &[]).await?;
+        meal_plan::clear_meal(&pool, date).await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let body = "week_start=2026-08-08&meal_id=&notes=Still+here&meal_time=20%3A15&\
+                    duration_minutes=20";
+        let response = app
+            .oneshot(
+                Request::post(format!("/plan/{date}"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let after = meal_plan::get_by_date(&pool, date).await?.expect("entry");
+        assert_eq!(after.meal_id, None);
+        assert_eq!(after.notes.as_deref(), Some("Still here"));
+        assert_eq!(
+            after.start_time_override,
+            Some(NaiveTime::from_hms_opt(20, 15, 0).unwrap())
+        );
+        assert!(after.deleted_at.is_none());
+
+        Ok(())
+    }
+
+    /// "Suggest week" fills days that have no meal - including one whose meal
+    /// the user deliberately removed, without discarding what they set up.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn suggesting_the_week_fills_a_day_whose_meal_was_cleared(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        crate::db::meals::insert(&pool, "Pasta").await?;
+        let today = chrono::Utc::now().date_naive();
+        let date = today + Duration::days(1);
+        let entry = meal_plan::upsert_entry(
+            &pool,
+            date,
+            tacos.id,
+            Some("bring dessert"),
+            Some(NaiveTime::from_hms_opt(19, 30, 0).unwrap()),
+            None,
+            &[],
+        )
+        .await?;
+        meal_plan::clear_meal(&pool, date).await?;
+
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+        app.oneshot(
+            Request::post("/plan/week/suggest")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("week_start={today}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let after = meal_plan::get_by_date(&pool, date).await?.expect("entry");
+        assert!(
+            after.meal_id.is_some(),
+            "suggest week should have refilled the day whose meal was cleared"
+        );
+        assert_eq!(after.notes.as_deref(), Some("bring dessert"));
+        assert_eq!(
+            after.start_time_override,
+            Some(NaiveTime::from_hms_opt(19, 30, 0).unwrap())
+        );
+        assert_eq!(
+            after.id, entry.id,
+            "it should be the same day, not a new row"
         );
 
         Ok(())
@@ -929,7 +1206,7 @@ mod tests {
         let entry = meal_plan::get_by_date(&pool, date)
             .await?
             .expect("entry should exist");
-        assert_eq!(entry.meal_id, tacos.id);
+        assert_eq!(entry.meal_id, Some(tacos.id));
 
         Ok(())
     }
@@ -956,7 +1233,8 @@ mod tests {
 
         let entry = meal_plan::get_by_date(&pool, date).await?.unwrap();
         assert_eq!(
-            entry.meal_id, alternative.id,
+            entry.meal_id,
+            Some(alternative.id),
             "Alice dislikes the current meal, so reroll should pick the other one"
         );
 
@@ -1130,7 +1408,7 @@ mod tests {
         .unwrap();
 
         let day0 = meal_plan::get_by_date(&pool, today).await?.unwrap();
-        assert_eq!(day0.meal_id, tacos.id);
+        assert_eq!(day0.meal_id, Some(tacos.id));
         assert_eq!(day0.notes.as_deref(), Some("already planned"));
 
         Ok(())
@@ -1210,6 +1488,7 @@ mod tests {
             "plan-day-form",
             "plan-day-suggest-form",
             "plan-day-clear-form",
+            "plan-day-clear-meal-form",
             "meal-picker",
             "meal-picker-trigger",
             "meal-picker-clear",
@@ -1231,6 +1510,14 @@ mod tests {
         assert!(
             html.contains(&format!("data-date=\"{date}\"")),
             "the day card needs data-date to be addressable after a repaint: {html}"
+        );
+
+        // How plan.js tells a day that exists from one that doesn't. It gates
+        // both autosave and the blank-meal branch of submit, so dropping it
+        // silently stops a cleared meal-less day from saving its other fields.
+        assert!(
+            html.contains("data-planned=\"true\""),
+            "a planned day needs data-planned for plan.js to autosave it: {html}"
         );
 
         Ok(())

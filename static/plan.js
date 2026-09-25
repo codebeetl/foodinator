@@ -112,14 +112,16 @@
     renderResults(items, query);
   }
 
-  // Every other field only auto-submits once a meal is chosen - otherwise
-  // toggling an attendee or typing a note on an unplanned day would either
-  // silently fail (meal_id is required) or pop the meal picker open on every
-  // keystroke. Picking a meal is what "graduates" the day and saves
-  // whatever's already been filled in alongside it.
+  // Every other field only auto-submits once the day exists - otherwise
+  // toggling an attendee or typing a note on a completely unplanned day would
+  // either silently fail or pop the meal picker open on every keystroke.
+  // "Exists" rather than "has a meal": a day whose meal was cleared still owns
+  // its notes, attendees and time, so those must keep saving rather than
+  // silently reverting until a meal is picked again. Picking a meal is what
+  // "graduates" a brand-new day and saves whatever's been filled in with it.
   function autoSubmit(form) {
-    const mealIdInput = form.querySelector('input[name="meal_id"]');
-    if (!mealIdInput.value) return;
+    const card = form.closest(".plan-day");
+    if (!card || card.dataset.planned !== "true") return;
     form.requestSubmit();
   }
 
@@ -174,11 +176,12 @@
       return;
     }
 
-    // Same "Clear this day" action as the button at the bottom of the card -
-    // just reachable right next to the meal you're trying to undo.
+    // Removes just the meal, leaving the day's notes, attendees and time
+    // alone. The whole-entry clear at the bottom of the card is a separate
+    // form and a separate action.
     const clearBtn = event.target.closest(".meal-picker-clear");
     if (clearBtn) {
-      clearBtn.closest(".plan-day").querySelector(".plan-day-clear-form").requestSubmit();
+      clearBtn.closest(".plan-day").querySelector(".plan-day-clear-meal-form").requestSubmit();
       return;
     }
 
@@ -295,8 +298,9 @@
     const form = event.target;
     const isPlanDayForm = form.matches(".plan-day-form");
     const isClearForm = form.matches(".plan-day-clear-form");
+    const isClearMealForm = form.matches(".plan-day-clear-meal-form");
     const isSuggestForm = form.matches(".plan-day-suggest-form");
-    if (!isPlanDayForm && !isClearForm && !isSuggestForm) return;
+    if (!isPlanDayForm && !isClearForm && !isClearMealForm && !isSuggestForm) return;
 
     // The clear form's onsubmit attribute (confirm() dialog) runs before this
     // delegated listener since it's attached directly to the form - if the
@@ -306,7 +310,11 @@
 
     if (isPlanDayForm) {
       const mealIdInput = form.querySelector('input[name="meal_id"]');
-      if (!mealIdInput.value) {
+      const card = form.closest(".plan-day");
+      // No meal on a day that doesn't exist yet means the user submitted a
+      // blank day - reopen the picker. On a day that already exists it's a
+      // legitimate state (the meal was cleared), so save it.
+      if (!mealIdInput.value && (!card || card.dataset.planned !== "true")) {
         event.preventDefault();
         openPicker(form.querySelector(".meal-picker"));
         return;

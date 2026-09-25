@@ -177,9 +177,10 @@ pub async fn list_top(
 /// all (or only cleared ones) are simply absent from the map.
 pub async fn last_planned_dates(pool: &PgPool) -> sqlx::Result<HashMap<i64, NaiveDate>> {
     let rows = sqlx::query!(
-        r#"SELECT meal_id, MAX(entry_date) AS "last_planned!: NaiveDate"
+        r#"SELECT meal_id AS "meal_id!: i64", MAX(entry_date) AS "last_planned!: NaiveDate"
            FROM meal_plan_entries
            WHERE deleted_at IS NULL
+             AND meal_id IS NOT NULL
            GROUP BY meal_id"#
     )
     .fetch_all(pool)
