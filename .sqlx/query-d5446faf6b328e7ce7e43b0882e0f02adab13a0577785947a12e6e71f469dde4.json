@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id,\n             COALESCE(freq.occurrences, 0) AS \"all_time_occurrences!\",\n             window_dates.dates AS planned_dates,\n             likes.consumer_ids AS liked_by,\n             dislikes.consumer_ids AS disliked_by\n           FROM meals m\n           LEFT JOIN (\n             SELECT meal_id, COUNT(*) AS occurrences\n             FROM meal_plan_entries\n             WHERE deleted_at IS NULL\n             GROUP BY meal_id\n           ) freq ON freq.meal_id = m.id\n           LEFT JOIN (\n             SELECT meal_id, array_agg(entry_date) AS dates\n             FROM meal_plan_entries\n             WHERE deleted_at IS NULL\n               AND entry_date >= $1\n               AND entry_date <= $2\n             GROUP BY meal_id\n           ) window_dates ON window_dates.meal_id = m.id\n           LEFT JOIN (\n             SELECT meal_id, array_agg(consumer_id) AS consumer_ids\n             FROM consumer_meal_preferences\n             WHERE preference = 'like'\n             GROUP BY meal_id\n           ) likes ON likes.meal_id = m.id\n           LEFT JOIN (\n             SELECT meal_id, array_agg(consumer_id) AS consumer_ids\n             FROM consumer_meal_preferences\n             WHERE preference = 'dislike'\n             GROUP BY meal_id\n           ) dislikes ON dislikes.meal_id = m.id\n           WHERE m.active",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "meals",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "all_time_occurrences!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "planned_dates",
+        "type_info": "DateArray",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "liked_by",
+        "type_info": "Int8Array",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "disliked_by",
+        "type_info": "Int8Array",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d5446faf6b328e7ce7e43b0882e0f02adab13a0577785947a12e6e71f469dde4"
+}
