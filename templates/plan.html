@@ -13,6 +13,11 @@
     <a href="/plan?start={{ next_start }}">Next week &rarr;</a>
 </nav>
 
+<form method="post" action="/plan/week/suggest" class="suggest-week-form">
+    <input type="hidden" name="week_start" value="{{ week_start }}">
+    <button type="submit" class="secondary">Suggest week</button>
+</form>
+
 <div class="plan-grid">
     {% for day in days %}
     {% call macros::plan_day_card(day, week_start, consumers) %}{% endcall %}
