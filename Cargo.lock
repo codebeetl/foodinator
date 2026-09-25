@@ -592,6 +592,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "dotenvy",
+ "rand",
  "reqwest",
  "serde",
  "serde_json",

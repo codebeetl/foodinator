@@ -178,7 +178,7 @@
     // just reachable right next to the meal you're trying to undo.
     const clearBtn = event.target.closest(".meal-picker-clear");
     if (clearBtn) {
-      clearBtn.closest(".plan-day").querySelector("form.inline").requestSubmit();
+      clearBtn.closest(".plan-day").querySelector(".plan-day-clear-form").requestSubmit();
       return;
     }
 
@@ -274,8 +274,9 @@
   document.addEventListener("submit", (event) => {
     const form = event.target;
     const isPlanDayForm = form.matches(".plan-day-form");
-    const isClearForm = form.matches(".plan-day form.inline");
-    if (!isPlanDayForm && !isClearForm) return;
+    const isClearForm = form.matches(".plan-day-clear-form");
+    const isSuggestForm = form.matches(".plan-day-suggest-form");
+    if (!isPlanDayForm && !isClearForm && !isSuggestForm) return;
 
     // The clear form's onsubmit attribute (confirm() dialog) runs before this
     // delegated listener since it's attached directly to the form - if the

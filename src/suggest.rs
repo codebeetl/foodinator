@@ -75,7 +75,9 @@ fn any_attendee_dislikes(candidate: &MealCandidate, attendee_ids: &[i64]) -> boo
         .any(|id| candidate.disliked_by.contains(id))
 }
 
-const STALENESS_CAP_DAYS: i64 = 28;
+/// How far back/forward to look when deciding a meal is "stale" - also the
+/// window callers should fetch `MealCandidate::planned_dates` over.
+pub const STALENESS_CAP_DAYS: i64 = 28;
 
 fn staleness_days(candidate: &MealCandidate, target_date: NaiveDate) -> i64 {
     candidate
