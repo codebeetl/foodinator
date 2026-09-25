@@ -191,6 +191,78 @@ pub async fn last_planned_dates(pool: &PgPool) -> sqlx::Result<HashMap<i64, Naiv
         .collect())
 }
 
+/// Every active meal's history/preference data, fetched once and reused by
+/// `crate::suggest::score_candidates` for every day of a week rather than
+/// requeried per day. `all_time_occurrences` counts every non-deleted entry
+/// ever (the "household favourite" signal); `planned_dates` only counts
+/// entries within `[window_start, window_end]` (the "staleness" signal) - a
+/// separate, usually-narrower window from the all-time count.
+pub async fn candidates_for_suggestion(
+    pool: &PgPool,
+    window_start: NaiveDate,
+    window_end: NaiveDate,
+) -> sqlx::Result<Vec<crate::suggest::MealCandidate>> {
+    struct Row {
+        id: i64,
+        all_time_occurrences: i64,
+        planned_dates: Option<Vec<NaiveDate>>,
+        liked_by: Option<Vec<i64>>,
+        disliked_by: Option<Vec<i64>>,
+    }
+
+    let rows = sqlx::query_as!(
+        Row,
+        r#"SELECT m.id,
+             COALESCE(freq.occurrences, 0) AS "all_time_occurrences!",
+             window_dates.dates AS planned_dates,
+             likes.consumer_ids AS liked_by,
+             dislikes.consumer_ids AS disliked_by
+           FROM meals m
+           LEFT JOIN (
+             SELECT meal_id, COUNT(*) AS occurrences
+             FROM meal_plan_entries
+             WHERE deleted_at IS NULL
+             GROUP BY meal_id
+           ) freq ON freq.meal_id = m.id
+           LEFT JOIN (
+             SELECT meal_id, array_agg(entry_date) AS dates
+             FROM meal_plan_entries
+             WHERE deleted_at IS NULL
+               AND entry_date >= $1
+               AND entry_date <= $2
+             GROUP BY meal_id
+           ) window_dates ON window_dates.meal_id = m.id
+           LEFT JOIN (
+             SELECT meal_id, array_agg(consumer_id) AS consumer_ids
+             FROM consumer_meal_preferences
+             WHERE preference = 'like'
+             GROUP BY meal_id
+           ) likes ON likes.meal_id = m.id
+           LEFT JOIN (
+             SELECT meal_id, array_agg(consumer_id) AS consumer_ids
+             FROM consumer_meal_preferences
+             WHERE preference = 'dislike'
+             GROUP BY meal_id
+           ) dislikes ON dislikes.meal_id = m.id
+           WHERE m.active"#,
+        window_start,
+        window_end
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| crate::suggest::MealCandidate {
+            id: row.id,
+            all_time_occurrences: row.all_time_occurrences,
+            planned_dates: row.planned_dates.unwrap_or_default(),
+            liked_by: row.liked_by.unwrap_or_default(),
+            disliked_by: row.disliked_by.unwrap_or_default(),
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +606,85 @@ mod tests {
             "a soft-deleted (cleared) plan entry shouldn't count toward the meal's \
              occurrences, so Curry ties Tacos at zero and alphabetical order applies"
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn candidates_for_suggestion_counts_occurrences_outside_the_window_too(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = insert(&pool, "Tacos").await?;
+        let long_ago = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        crate::db::meal_plan::upsert_entry(&pool, long_ago, tacos.id, None, None, None, &[])
+            .await?;
+
+        let window_start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let window_end = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let candidates = candidates_for_suggestion(&pool, window_start, window_end).await?;
+
+        let tacos_candidate = candidates.iter().find(|c| c.id == tacos.id).unwrap();
+        assert_eq!(
+            tacos_candidate.all_time_occurrences, 1,
+            "all-time occurrence count includes entries outside the window"
+        );
+        assert!(
+            tacos_candidate.planned_dates.is_empty(),
+            "planned_dates only includes entries inside the window"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn candidates_for_suggestion_reports_planned_dates_inside_the_window(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = insert(&pool, "Tacos").await?;
+        let window_start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let planned = NaiveDate::from_ymd_opt(2026, 1, 15).unwrap();
+        let window_end = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        crate::db::meal_plan::upsert_entry(&pool, planned, tacos.id, None, None, None, &[]).await?;
+
+        let candidates = candidates_for_suggestion(&pool, window_start, window_end).await?;
+
+        let tacos_candidate = candidates.iter().find(|c| c.id == tacos.id).unwrap();
+        assert_eq!(tacos_candidate.planned_dates, vec![planned]);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn candidates_for_suggestion_reports_liked_and_disliked_consumer_ids(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = insert(&pool, "Tacos").await?;
+        let alice = crate::db::consumers::insert(&pool, "Alice").await?;
+        let bob = crate::db::consumers::insert(&pool, "Bob").await?;
+        crate::db::preferences::set(&pool, alice.id, tacos.id, Some("like")).await?;
+        crate::db::preferences::set(&pool, bob.id, tacos.id, Some("dislike")).await?;
+
+        let window_start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let window_end = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let candidates = candidates_for_suggestion(&pool, window_start, window_end).await?;
+
+        let tacos_candidate = candidates.iter().find(|c| c.id == tacos.id).unwrap();
+        assert_eq!(tacos_candidate.liked_by, vec![alice.id]);
+        assert_eq!(tacos_candidate.disliked_by, vec![bob.id]);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn candidates_for_suggestion_excludes_inactive_meals(pool: PgPool) -> sqlx::Result<()> {
+        let inactive = insert(&pool, "Retired Dish").await?;
+        update(&pool, inactive.id, &inactive.name, false).await?;
+
+        let window_start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let window_end = NaiveDate::from_ymd_opt(2026, 1, 31).unwrap();
+        let candidates = candidates_for_suggestion(&pool, window_start, window_end).await?;
+
+        assert!(!candidates.iter().any(|c| c.id == inactive.id));
 
         Ok(())
     }
