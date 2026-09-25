@@ -254,8 +254,16 @@
     input.focus();
   }
 
+  // Which request owns each day's card right now, keyed by date rather than by
+  // element: a card is replaced wholesale on every repaint, so the node a
+  // request captured is stale the moment an earlier response for the same day
+  // lands, but its date is stable.
+  const paintOwner = new Map();
+
   async function submitFormAjax(form) {
-    const card = form.closest(".plan-day");
+    const date = form.closest(".plan-day").dataset.date;
+    const token = (paintOwner.get(date) || 0) + 1;
+    paintOwner.set(date, token);
     const response = await fetch(form.action, {
       method: "POST",
       headers: { "X-Requested-With": "XMLHttpRequest" },
@@ -263,8 +271,20 @@
     });
     if (!response.ok) return;
     const html = await response.text();
+    // A newer request for this day has been issued since, so it owns the
+    // card - painting now would be overwritten by it anyway, and doing it
+    // anyway is what used to make the *last* response lose.
+    if (paintOwner.get(date) !== token) return;
     activePicker = null;
-    card.outerHTML = html;
+    // Re-query rather than reusing the captured node. Two requests for the
+    // same day are normal (blurring an edited Notes field autosaves at the
+    // same moment as clicking "Clear this day"), and whichever response lands
+    // first replaces the card, detaching the node the other one is still
+    // holding. Writing outerHTML to a detached node is a silent no-op, so the
+    // second response used to vanish and the card kept showing a meal the
+    // server had already cleared.
+    const liveCard = document.querySelector(`.plan-day[data-date="${date}"]`);
+    if (liveCard) liveCard.outerHTML = html;
   }
 
   // Delegated so it keeps working after a card is replaced via outerHTML - a

@@ -7,7 +7,7 @@
 {% endmacro %}
 
 {% macro plan_day_card(day, week_start, consumers) %}
-<div class="card plan-day">
+<div class="card plan-day" data-date="{{ day.date }}">
     <h3>{{ day.date_label }}</h3>
     <form method="post" action="/plan/{{ day.date }}" class="plan-day-form">
         <input type="hidden" name="week_start" value="{{ week_start }}">
