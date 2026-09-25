@@ -4,6 +4,7 @@ pub mod db;
 pub mod gcal;
 pub mod ha;
 pub mod state;
+pub mod suggest;
 pub mod web;
 
 use std::sync::Arc;
