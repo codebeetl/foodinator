@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .route("/plan", get(show))
         .route("/plan/{date}", post(update))
         .route("/plan/{date}/delete", post(delete))
+        .route("/plan/{date}/suggest", post(suggest_day))
 }
 
 struct PlanDay {
@@ -318,6 +319,108 @@ async fn delete(
         let app_settings = settings::get(&state.pool)
             .await
             .expect("failed to load settings");
+        let consumers = active_consumers(&state.pool).await;
+        let day = build_plan_day(
+            &state.pool,
+            date,
+            &consumers,
+            app_settings.default_start_time,
+            app_settings.default_duration_minutes,
+        )
+        .await;
+        return PlanDayFragmentTemplate {
+            day,
+            week_start: form.week_start,
+            consumers,
+        }
+        .into_response();
+    }
+
+    Redirect::to(&format!("/plan?start={}", form.week_start)).into_response()
+}
+
+#[derive(Deserialize)]
+struct SuggestDayForm {
+    week_start: NaiveDate,
+}
+
+fn jitter(_meal_id: i64) -> f64 {
+    rand::random::<f64>() * 3.0
+}
+
+/// Fills an empty day, or picks a different meal for one that's already
+/// planned ("reroll") - the current meal is excluded so a reroll can't just
+/// reconfirm the same pick.
+async fn suggest_day(
+    State(state): State<AppState>,
+    Path(date): Path<NaiveDate>,
+    headers: HeaderMap,
+    Form(form): Form<SuggestDayForm>,
+) -> Response {
+    let app_settings = settings::get(&state.pool)
+        .await
+        .expect("failed to load settings");
+    let consumers = active_consumers(&state.pool).await;
+    let default_attendee_ids: Vec<i64> = consumers
+        .iter()
+        .filter(|c| c.is_default)
+        .map(|c| c.id)
+        .collect();
+
+    let live_entry = meal_plan::get_by_date(&state.pool, date)
+        .await
+        .expect("failed to fetch plan entry")
+        .filter(|entry| entry.deleted_at.is_none());
+    let attendee_ids = match &live_entry {
+        Some(entry) => meal_plan::get_attendance(&state.pool, entry.id)
+            .await
+            .expect("failed to fetch attendance"),
+        None => default_attendee_ids.clone(),
+    };
+
+    let window_start = date - Duration::days(crate::suggest::STALENESS_CAP_DAYS);
+    let window_end = date + Duration::days(crate::suggest::STALENESS_CAP_DAYS);
+    let candidates =
+        crate::db::meals::candidates_for_suggestion(&state.pool, window_start, window_end)
+            .await
+            .expect("failed to fetch suggestion candidates");
+
+    let picked_meal_id = crate::suggest::score_candidates(
+        &candidates,
+        date,
+        &attendee_ids,
+        live_entry.as_ref().map(|entry| entry.meal_id),
+        jitter,
+    );
+
+    if let Some(meal_id) = picked_meal_id {
+        match &live_entry {
+            Some(entry) => {
+                meal_plan::upsert_entry(
+                    &state.pool,
+                    date,
+                    meal_id,
+                    entry.notes.as_deref(),
+                    entry.start_time_override,
+                    entry.duration_minutes_override,
+                    &entry.guest_names,
+                )
+                .await
+                .expect("failed to upsert plan entry");
+            }
+            None => {
+                let entry =
+                    meal_plan::upsert_entry(&state.pool, date, meal_id, None, None, None, &[])
+                        .await
+                        .expect("failed to upsert plan entry");
+                meal_plan::set_attendance(&state.pool, entry.id, &default_attendee_ids)
+                    .await
+                    .expect("failed to set attendance");
+            }
+        }
+    }
+
+    if super::is_ajax_request(&headers) {
         let consumers = active_consumers(&state.pool).await;
         let day = build_plan_day(
             &state.pool,
@@ -726,6 +829,170 @@ mod tests {
         assert!(
             html.contains("Next unplanned week"),
             "jump-to-upcoming-week link should show when browsing a different week: {html}"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn suggesting_an_empty_day_fills_it_with_the_only_active_meal(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post(format!("/plan/{date}/suggest"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("week_start=2026-08-08"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+        let entry = meal_plan::get_by_date(&pool, date)
+            .await?
+            .expect("entry should exist");
+        assert_eq!(entry.meal_id, tacos.id);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rerolling_a_planned_day_picks_a_different_meal(pool: PgPool) -> sqlx::Result<()> {
+        let alice = consumers::insert(&pool, "Alice").await?;
+        let current = crate::db::meals::insert(&pool, "Tacos").await?;
+        let alternative = crate::db::meals::insert(&pool, "Curry").await?;
+        crate::db::preferences::set(&pool, alice.id, current.id, Some("dislike")).await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let entry = meal_plan::upsert_entry(&pool, date, current.id, None, None, None, &[]).await?;
+        meal_plan::set_attendance(&pool, entry.id, &[alice.id]).await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        app.oneshot(
+            Request::post(format!("/plan/{date}/suggest"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("week_start=2026-08-08"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let entry = meal_plan::get_by_date(&pool, date).await?.unwrap();
+        assert_eq!(
+            entry.meal_id, alternative.id,
+            "Alice dislikes the current meal, so reroll should pick the other one"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rerolling_preserves_notes_and_time_and_duration_overrides(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let alice = consumers::insert(&pool, "Alice").await?;
+        let current = crate::db::meals::insert(&pool, "Tacos").await?;
+        crate::db::meals::insert(&pool, "Curry").await?;
+        crate::db::preferences::set(&pool, alice.id, current.id, Some("dislike")).await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let entry = meal_plan::upsert_entry(
+            &pool,
+            date,
+            current.id,
+            Some("Family dinner"),
+            Some(NaiveTime::from_hms_opt(19, 0, 0).unwrap()),
+            Some(45),
+            &["Aunt Jane".to_string()],
+        )
+        .await?;
+        meal_plan::set_attendance(&pool, entry.id, &[alice.id]).await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        app.oneshot(
+            Request::post(format!("/plan/{date}/suggest"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("week_start=2026-08-08"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let entry = meal_plan::get_by_date(&pool, date).await?.unwrap();
+        assert_eq!(entry.notes.as_deref(), Some("Family dinner"));
+        assert_eq!(
+            entry.start_time_override,
+            Some(NaiveTime::from_hms_opt(19, 0, 0).unwrap())
+        );
+        assert_eq!(entry.duration_minutes_override, Some(45));
+        assert_eq!(entry.guest_names, vec!["Aunt Jane".to_string()]);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn filling_a_cleared_day_resets_attendance_to_current_defaults(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let stale_attendee = consumers::insert(&pool, "Alice").await?;
+        let default_attendee = consumers::insert(&pool, "Bob").await?;
+        consumers::set_default(&pool, default_attendee.id, true).await?;
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let old_entry =
+            meal_plan::upsert_entry(&pool, date, tacos.id, None, None, None, &[]).await?;
+        meal_plan::set_attendance(&pool, old_entry.id, &[stale_attendee.id]).await?;
+        meal_plan::soft_delete(&pool, date).await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        app.oneshot(
+            Request::post(format!("/plan/{date}/suggest"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("week_start=2026-08-08"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let entry = meal_plan::get_by_date(&pool, date).await?.unwrap();
+        let attendance = meal_plan::get_attendance(&pool, entry.id).await?;
+        assert_eq!(
+            attendance,
+            vec![default_attendee.id],
+            "a filled-from-cleared day should attend the current defaults, not the stale attendance"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn suggesting_via_ajax_returns_the_rerendered_fragment(pool: PgPool) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .oneshot(
+                Request::post(format!("/plan/{date}/suggest"))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .header("X-Requested-With", "XMLHttpRequest")
+                    .body(Body::from("week_start=2026-08-08"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            html.contains(&tacos.name),
+            "fragment should show the suggested meal's name: {html}"
         );
 
         Ok(())

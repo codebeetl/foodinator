@@ -68,8 +68,12 @@
             <input type="number" name="duration_minutes" min="1" value="{{ day.effective_duration_minutes }}">
         </label>
     </form>
+    <form method="post" action="/plan/{{ day.date }}/suggest" class="plan-day-suggest-form inline">
+        <input type="hidden" name="week_start" value="{{ week_start }}">
+        <button type="submit" class="secondary">{% if day.has_entry %}Reroll{% else %}Suggest{% endif %}</button>
+    </form>
     {% if day.has_entry %}
-    <form method="post" action="/plan/{{ day.date }}/delete" class="inline"
+    <form method="post" action="/plan/{{ day.date }}/delete" class="plan-day-clear-form inline"
           onsubmit="return confirm('Clear this day? This cannot be undone.');">
         <input type="hidden" name="week_start" value="{{ week_start }}">
         <button type="submit" class="secondary">Clear this day</button>
