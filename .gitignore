@@ -7,3 +7,6 @@ opencode.json
 .vscode/
 .claude/settings.local.json
 .playwright-mcp/
+
+# Node (jsdom) test deps
+node_modules/

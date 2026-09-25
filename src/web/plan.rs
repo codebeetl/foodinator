@@ -1162,4 +1162,77 @@ mod tests {
 
         Ok(())
     }
+
+    // Every value of every class/id attribute in the page, split into tokens.
+    fn dom_hooks(html: &str) -> Vec<String> {
+        let mut hooks = Vec::new();
+        for attr in ["class=\"", "id=\""] {
+            let mut rest = html;
+            while let Some(start) = rest.find(attr) {
+                rest = &rest[start + attr.len()..];
+                let Some(end) = rest.find('"') else { break };
+                hooks.extend(rest[..end].split_whitespace().map(str::to_owned));
+                rest = &rest[end + 1..];
+            }
+        }
+        hooks
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn plan_page_exposes_the_hooks_plan_js_binds_to(pool: PgPool) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        meal_plan::upsert_entry(&pool, date, tacos.id, None, None, None, &[]).await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        let response = app
+            .oneshot(
+                Request::get(format!("/plan?start={date}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        let hooks = dom_hooks(&html);
+
+        // static/plan.js reaches the page entirely through these selectors and
+        // the test fixture in tests/js/plan.test.js mirrors the same markup.
+        // Renaming one silently breaks every card interaction while all the
+        // other server tests keep passing, because nothing server-side looks
+        // them up.
+        for hook in [
+            "plan-day",
+            "plan-day-form",
+            "plan-day-suggest-form",
+            "plan-day-clear-form",
+            "meal-picker",
+            "meal-picker-trigger",
+            "meal-picker-clear",
+            "add-guest-btn",
+            "meal-search-dialog",
+            "meal-search-input",
+            "meal-search-results",
+            "meal-search-close",
+        ] {
+            assert!(
+                hooks.iter().any(|h| h == hook),
+                "no element carries the {hook:?} hook that plan.js binds to"
+            );
+        }
+
+        // The card's stable identity. submitFormAjax keys request sequencing by
+        // it and re-queries the live card with it after each response, so a
+        // day whose card races two writes repaints the right element.
+        assert!(
+            html.contains(&format!("data-date=\"{date}\"")),
+            "the day card needs data-date to be addressable after a repaint: {html}"
+        );
+
+        Ok(())
+    }
 }

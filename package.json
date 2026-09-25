@@ -1,0 +1,11 @@
+{
+  "name": "foodinator",
+  "private": true,
+  "description": "Browser-side tests for the plan page. The Rust suite covers the server; this covers static/plan.js, which no Rust test can reach.",
+  "scripts": {
+    "test": "node --test tests/js/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}

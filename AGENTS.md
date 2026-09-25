@@ -34,9 +34,26 @@ invent stricter ones:
 | Build | `SQLX_OFFLINE=true cargo build --release` |
 | sqlx query cache | `cargo sqlx prepare --check --database-url postgresql://foodinator:foodinator@db:5432/foodinator` |
 | Tests | `cargo test` |
+| JS tests | `npm test` |
 
-All must pass before a commit. `cargo fmt` and `cargo test` need no live database;
-the sqlx and `test` checks do.
+All must pass before a commit. `cargo fmt`, `cargo test` and `npm test` need no
+live database; the sqlx and `test` checks do.
+
+### Frontend tests
+
+`static/plan.js` is an IIFE with no exports, so `tests/js/plan.test.js` loads it
+into a jsdom window (`runScripts: "dangerously"`, so inline `onsubmit`
+attributes compile) with a stubbed `fetch` the test settles by hand. That is
+what lets it assert on *response ordering* - the class of bug that let a
+cleared day keep showing its old meal because the slower response painted a
+card node that a faster one had already detached. `npm test` needs no Rust
+toolchain; the first run needs `npm install` to produce `package-lock.json`.
+
+The plan page's classes and `data-date` are a contract between
+`templates/macros.html` and `static/plan.js`, and nothing server-side looks
+them up, so `plan_page_exposes_the_hooks_plan_js_binds_to` in
+`src/web/plan.rs` guards the rendered half. Rename a hook in the template and
+that test fails; change markup in the jsdom fixture and keep it in step.
 
 ### After adding or changing any `sqlx::query!`/`query_as!` call
 
