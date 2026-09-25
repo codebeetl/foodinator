@@ -22,8 +22,14 @@ impl HaRestClient {
     }
 }
 
+/// HA's `calendar.create_event` service treats a datetime string with no
+/// offset as being in HA's own configured local timezone, not UTC - so a
+/// bare "%Y-%m-%d %H:%M:%S" here (as this used to format) gets silently
+/// reinterpreted as local time and re-shifted by HA's UTC offset on top of
+/// the household-to-UTC conversion already applied upstream. RFC3339 keeps
+/// the offset explicit so HA parses it as the UTC instant it actually is.
 fn ha_datetime(dt: DateTime<Utc>) -> String {
-    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    dt.to_rfc3339()
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +132,19 @@ mod tests {
         )
     }
 
+    #[test]
+    fn ha_datetime_includes_an_explicit_utc_offset() {
+        let dt = DateTime::parse_from_rfc3339("2026-08-10T18:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        assert_eq!(
+            ha_datetime(dt),
+            "2026-08-10T18:00:00+00:00",
+            "a bare offset-less string would be reinterpreted by HA as its own local timezone"
+        );
+    }
+
     #[tokio::test]
     async fn get_api_status_sends_bearer_token_and_succeeds_on_200() {
         let server = MockServer::start().await;
@@ -163,8 +182,8 @@ mod tests {
             .and(body_partial_json(serde_json::json!({
                 "entity_id": "calendar.foodinator",
                 "summary": "Alice's dinner",
-                "start_date_time": "2026-08-10 18:00:00",
-                "end_date_time": "2026-08-10 19:00:00",
+                "start_date_time": "2026-08-10T18:00:00+00:00",
+                "end_date_time": "2026-08-10T19:00:00+00:00",
             })))
             .respond_with(ResponseTemplate::new(200))
             .mount(&server)
