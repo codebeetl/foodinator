@@ -25,6 +25,7 @@ pub fn router() -> Router<AppState> {
         .route("/plan/{date}", post(update))
         .route("/plan/{date}/delete", post(delete))
         .route("/plan/{date}/suggest", post(suggest_day))
+        .route("/plan/week/suggest", post(suggest_week))
 }
 
 struct PlanDay {
@@ -439,6 +440,78 @@ async fn suggest_day(
     }
 
     Redirect::to(&format!("/plan?start={}", form.week_start)).into_response()
+}
+
+#[derive(Deserialize)]
+struct SuggestWeekForm {
+    week_start: NaiveDate,
+}
+
+/// Fills every currently-empty day from today through the end of the
+/// currently-viewed week - days before today, and days already planned, are
+/// left untouched. Candidates are fetched once and reused across the whole
+/// fill, with each pick fed back into its own candidate before the next day
+/// is scored, so the same meal isn't repeated across the week when enough
+/// distinct meals exist.
+async fn suggest_week(
+    State(state): State<AppState>,
+    Form(form): Form<SuggestWeekForm>,
+) -> Response {
+    let today = clock::today(&state.household_tz);
+    let week_start = form.week_start;
+    let week_end = week_start + Duration::days(6);
+
+    let consumers = active_consumers(&state.pool).await;
+    let default_attendee_ids: Vec<i64> = consumers
+        .iter()
+        .filter(|c| c.is_default)
+        .map(|c| c.id)
+        .collect();
+
+    let window_start = week_start - Duration::days(crate::suggest::STALENESS_CAP_DAYS);
+    let window_end = week_end + Duration::days(crate::suggest::STALENESS_CAP_DAYS);
+    let mut candidates =
+        crate::db::meals::candidates_for_suggestion(&state.pool, window_start, window_end)
+            .await
+            .expect("failed to fetch suggestion candidates");
+
+    for offset in 0..7 {
+        let date = week_start + Duration::days(offset);
+        if date < today {
+            continue;
+        }
+        let has_entry = meal_plan::get_by_date(&state.pool, date)
+            .await
+            .expect("failed to fetch plan entry")
+            .is_some_and(|entry| entry.deleted_at.is_none());
+        if has_entry {
+            continue;
+        }
+
+        let picked_meal_id = crate::suggest::score_candidates(
+            &candidates,
+            date,
+            &default_attendee_ids,
+            None,
+            jitter,
+        );
+        let Some(meal_id) = picked_meal_id else {
+            continue;
+        };
+
+        let entry = meal_plan::upsert_entry(&state.pool, date, meal_id, None, None, None, &[])
+            .await
+            .expect("failed to upsert plan entry");
+        meal_plan::set_attendance(&state.pool, entry.id, &default_attendee_ids)
+            .await
+            .expect("failed to set attendance");
+
+        if let Some(candidate) = candidates.iter_mut().find(|c| c.id == meal_id) {
+            candidate.planned_dates.push(date);
+        }
+    }
+
+    Redirect::to(&format!("/plan?start={week_start}")).into_response()
 }
 
 #[cfg(test)]
@@ -994,6 +1067,98 @@ mod tests {
             html.contains(&tacos.name),
             "fragment should show the suggested meal's name: {html}"
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn suggesting_the_week_fills_empty_days_with_distinct_meals_when_enough_exist(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        crate::db::meals::insert(&pool, "Tacos").await?;
+        crate::db::meals::insert(&pool, "Curry").await?;
+        let today = chrono::Utc::now().date_naive();
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        app.oneshot(
+            Request::post("/plan/week/suggest")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("week_start={today}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let day0 = meal_plan::get_by_date(&pool, today).await?.unwrap();
+        let day1 = meal_plan::get_by_date(&pool, today + Duration::days(1))
+            .await?
+            .unwrap();
+        assert_ne!(
+            day0.meal_id, day1.meal_id,
+            "with two candidate meals available, consecutive days shouldn't repeat one"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn suggesting_the_week_leaves_an_already_planned_day_untouched(
+        pool: PgPool,
+    ) -> sqlx::Result<()> {
+        let tacos = crate::db::meals::insert(&pool, "Tacos").await?;
+        crate::db::meals::insert(&pool, "Curry").await?;
+        let today = chrono::Utc::now().date_naive();
+        meal_plan::upsert_entry(
+            &pool,
+            today,
+            tacos.id,
+            Some("already planned"),
+            None,
+            None,
+            &[],
+        )
+        .await?;
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        app.oneshot(
+            Request::post("/plan/week/suggest")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("week_start={today}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let day0 = meal_plan::get_by_date(&pool, today).await?.unwrap();
+        assert_eq!(day0.meal_id, tacos.id);
+        assert_eq!(day0.notes.as_deref(), Some("already planned"));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn suggesting_the_week_skips_days_before_today(pool: PgPool) -> sqlx::Result<()> {
+        crate::db::meals::insert(&pool, "Tacos").await?;
+        let today = chrono::Utc::now().date_naive();
+        let past_week_start = today - Duration::days(10);
+        let app = router().with_state(crate::state::test_app_state(pool.clone()));
+
+        app.oneshot(
+            Request::post("/plan/week/suggest")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("week_start={past_week_start}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        for offset in 0..7 {
+            let date = past_week_start + Duration::days(offset);
+            assert!(
+                meal_plan::get_by_date(&pool, date).await?.is_none(),
+                "day {date} is before today and should have been skipped"
+            );
+        }
 
         Ok(())
     }
